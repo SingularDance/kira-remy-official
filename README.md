@@ -1,0 +1,263 @@
+# 星夜颂歌 · Remy 桌宠
+
+**奇点摄动（SingularDance）首次公开零技术力展示！！**
+
+我们认真做了一只桌宠。认真地 (大概
+（技术力为零，陪伴值拉满。投诉请找阿莉安。）
+
+---
+
+来自 5000 年后的少女舰长(?) **蕾咪（Remy）**，现在停在你的桌面上。
+
+哼，才不是特地来陪你的。阿斯忒瑞亚号路过地球，顺便停一下而已。  
+……不过既然你打开了这个仓库，那就一起把她照顾好吧。
+
+---
+
+## 这是什么
+
+**Remy** 是一款 Windows 桌面宠物：会聊天、会换表情，偶尔还会傲娇一下。
+
+她可以：
+
+- 用 AI 陪你聊天（DeepSeek / 通义千问）
+- 根据心情切换表情——开心、生气、委屈、期待，无聊久了还会睡着
+- 一起玩 2048、猜拳、掷骰子
+- 帮你记笔记、开程序、开书签
+- 记住你们的对话，也记得你是谁
+
+主角是 **蕾咪**：16 岁，152cm，喜欢慕斯蛋糕和抹茶雪顶拿铁。  
+不许笑她矮。
+
+---
+
+## 怎么用
+
+### 1. 准备环境
+
+- Windows（当前主要支持）
+- Python 3.10+
+
+安装依赖：双击 `install.bat`，或：
+
+```bat
+python -m pip install PyQt5 requests pyperclip pyinstaller
+```
+
+### 2. 配置 API Key（必做）
+
+密钥写在 **`config.json`**，不要写进 `Remy.py`。
+
+```bat
+copy config.example.json config.json
+```
+
+然后用编辑器打开 `config.json`，大致长这样：
+
+```json
+{
+  "api": {
+    "primary": "deepseek",
+    "primary_key": "这里填你的 API Key",
+    "backup": "qwen",
+    "backup_key": "可选：备用 Key"
+  }
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `primary` | 主线路：`deepseek` 或 `qwen` |
+| `primary_key` | 主线路 API Key（必填） |
+| `backup` | 备用线路：`deepseek` 或 `qwen` |
+| `backup_key` | 备用 Key（可选，主线路失败时自动切换） |
+
+**去哪里拿免费 Key**
+
+- DeepSeek：[platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys)（推荐）
+- 通义千问：[bailian.console.aliyun.com](https://bailian.console.aliyun.com/?tab=api#/api-key)
+
+也可以不先改文件：直接启动，在弹窗里填写；或右键蕾咪 →「API 设置」。保存后一样会写入 `config.json`。
+
+`config.json` 已被 `.gitignore` 忽略，请不要提交，也不要发给别人。
+
+### 3. 启动
+
+```bat
+python Remy.py
+```
+
+也可以改好 `run.bat` 里的 Python 路径后双击运行。
+
+### 日常互动
+
+| 操作 | 说明 |
+|------|------|
+| 打字 + Enter | 跟蕾咪说话 |
+| 右键头像 | 打开功能菜单 |
+| 拖拽头像 | 移动位置 |
+| 点一下睡着的头像 | 叫醒她 |
+
+更多说明见应用内「使用说明书」，或 [`help.md`](./help.md)。
+
+### 打包成 exe
+
+```bat
+pack.bat
+```
+
+完成后在 `dist\` 里会生成 `星夜颂歌-蕾咪！.exe`。分享时提醒对方自己配置 API Key。
+
+---
+
+## 怎么开发
+
+欢迎来改。
+
+### 项目结构
+
+```text
+kira-remy-official/
+├── Remy.py                 # 主程序
+├── config.example.json     # 配置模板（提交到仓库）
+├── config.json             # 你的本地配置（含密钥，勿提交）
+├── Remy_*.png              # 表情立绘
+├── Remybaby.ico            # 图标
+├── help.md                 # 应用内说明书
+├── shortcuts.json          # 快捷程序 / 书签
+├── install.bat / run.bat / pack.bat
+├── 星夜颂歌-蕾咪！.spec
+└── README.md
+```
+
+本地还会生成（已在 `.gitignore`）：
+
+- `config.json` — API Key 与个人档案
+- `chat_log.txt` — 聊天记录
+- `notes.txt` — 笔记
+
+### 本地流程
+
+1. Fork 后 clone
+2. 建分支：`git checkout -b feature/your-change`
+3. `install.bat` → 复制并填写 `config.json` → `python Remy.py`
+4. 改完本地验证，再发 PR
+
+### 常见改动入口
+
+| 想改什么 | 看哪里 |
+|----------|--------|
+| 性格 / 人设提示词 | `Remy.py` 里的 `SYSTEM_PROMPT` |
+| 表情点击台词 | `EMOTION_PHRASES` |
+| 拖拽松手台词 | `DRAG_RELEASE_PHRASES` |
+| AI 供应商列表 | `API_PROVIDERS` |
+| 密钥与个人档案 | `config.json`（模板：`config.example.json`） |
+| 快捷方式 | `shortcuts.json` |
+| 立绘资源 | `Remy_*.png`（改了记得同步 `pack.bat` / `.spec`） |
+
+### 小约定
+
+- 保持蕾咪人设：傲娇、自称「蕾咪」、中文、短句
+- 不要提交 `config.json`、API Key、私人聊天记录
+- 改 UI / 表情 / 打包相关时，尽量在 Windows 上跑一遍
+- 比较大的改动，先开 Issue 也好
+
+---
+
+## 怎么发 PR
+
+欢迎 Pull Request。改动能跑、说明清楚就很好。
+
+### 提交前请确认
+
+- [ ] 基于最新主分支
+- [ ] 能正常启动、聊天、打开右键菜单
+- [ ] 没有提交密钥、`config.json`、`dist/`、`__pycache__/`
+- [ ] 动过资源或打包列表时，`pack.bat` 和 `.spec` 已同步
+- [ ] PR 标题能看懂做了什么
+
+### 标题示例
+
+- `feat: 给蕾咪加上天气问候`
+- `fix: 修复睡着后无法唤醒的问题`
+- `docs: 更新 config 配置说明`
+
+### 正文可以参考
+
+```markdown
+## 做了什么
+- 简短说明改动
+
+## 为什么
+- 解决了什么问题，或想带来什么变化
+
+## 怎么验证
+- [ ] 本地启动正常
+- [ ] 相关功能点过一遍
+```
+
+还不会改代码也没关系，先开 Issue 说说想法就很好。
+
+---
+
+## 技术栈
+
+- **Python 3**
+- **PyQt5** — 窗口与交互
+- **requests** — 调 AI API
+- **pyperclip** — 剪贴板
+- **PyInstaller** — 打包 exe
+
+AI 使用 OpenAI 兼容接口，目前内置 DeepSeek 与通义千问。
+
+---
+
+## 管理员
+
+| 职位 | 名字 | 备注 |
+|------|------|------|
+| 情绪支持贡献者（最主要） | Arian | 精神支柱本支柱。仓库能开着，多半靠这位 |
+| 项目发起人 | Violet Fizz | 把蕾咪从脑内拽进桌面的人 |
+| DEBUG 老哥 | wangbenchong | 专治各种不服。bug 看见他就腿软 |
+
+有事找管理员。没事先找蕾咪。蕾咪不理你再找管理员。
+
+---
+
+## 官方 QQ 群
+
+欸……你、你要来吗？
+
+星夜里有一点点甜，调查还在继续。  
+如果也想和蕾咪说说话、听听阿斯忒瑞亚号的悄悄话——  
+那就轻轻推开这扇门吧。人多的群满了，就换下一局，好不好？
+
+蕾咪才没有在门口等你呢。  
+……最多，偷看一眼有没有新消息而已。
+
+| 群名 | 群号 |
+|------|------|
+| 星夜颂歌调查一局 | `1093454484` |
+| 星夜颂歌调查二局 | `1092950471` |
+| 星夜颂歌调查三局 | `1102926153` |
+| 星夜颂歌调查四局 | `1102622196` |
+
+任选一局加入就好。记得礼貌一点点——虽然蕾咪嘴上不说，其实还是会开心的。
+
+---
+
+## License
+
+本仓库开源，欢迎学习、使用、二创与贡献。  
+二次分发时请保留对原项目与角色设定的合理署名，也请不要泄露他人的 API Key。
+
+---
+
+## 最后
+
+谢谢你愿意点开这个仓库。
+
+蕾咪才不是因为有人陪她才开心的。  
+……真的不是。笨蛋。
+
+那就，一起把星夜颂歌唱下去吧。

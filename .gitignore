@@ -1,0 +1,17 @@
+# 本地密钥与隐私数据（切勿提交）
+# 请复制 config.example.json → config.json 后填写 API Key
+config.json
+chat_log.txt
+notes.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/

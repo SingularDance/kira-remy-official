@@ -1,0 +1,22 @@
+{
+  "apps": [
+    {
+      "name": "计算器",
+      "path": "calc.exe"
+    },
+    {
+      "name": "记事本",
+      "path": "notepad.exe"
+    }
+  ],
+  "bookmarks": [
+    {
+      "name": "B站",
+      "url": "https://www.bilibili.com"
+    },
+    {
+      "name": "百度",
+      "url": "https://www.baidu.com"
+    }
+  ]
+}
