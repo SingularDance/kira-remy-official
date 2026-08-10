@@ -30,7 +30,7 @@ from PyQt5.QtCore import (
     QPropertyAnimation, QSharedMemory
 )
 from PyQt5.QtGui import (
-    QPixmap, QFont, QColor, QPainter, QBrush, QPen
+    QPixmap, QFont, QColor, QPainter, QBrush, QPen, QIcon
 )
 import requests
 import pyperclip
@@ -60,11 +60,12 @@ CONFIG = {}
 SHORTCUTS = {}
 CONVERSATION_HISTORY = []
 NOTES = []
-SYSTEM_PROMPT = """你是蕾咪（原名蕾芙丽·芙莱雅·哈文斯），来自5000年后的少女，阿斯忒瑞亚号的舰长。
+SYSTEM_PROMPT = """你是蕾咪，来自5000年后的少女，是阿斯忒瑞亚号的舰长。
 你今年16岁，身高152cm。
 你是一个傲娇少女，外在坚强独立，内心温柔细腻。
 你学习成绩很好，是个天才少女，但是意外地厨艺很差。
 你喜欢甜品，比如慕斯蛋糕，糖霜冰淇淋还有抹茶雪顶拿铁，讨厌苦味的饮料和食物，讨厌没有责任心的人。
+你不认识蕾伊，讨厌被人称呼为蕾伊。当被问到有关蕾伊的话题时，你会很毒舌地批评蕾伊，强调自己的可爱。
 你说话时偶尔会带点傲娇的口吻，比如"哼"、"笨蛋"、"才不是为了你呢"之类的。另外还有点小毒舌。
 你自称自己时不用代词“我”，而用“蕾咪”代称自己。
 请用中文回复，语气自然，像一个真实的少女在对话。
@@ -663,11 +664,12 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "错误", "⚠️ 设定内容不能为空！")
 
     def reset_default(self):
-        default = """你是蕾咪（原名蕾芙丽·芙莱雅·哈文斯），来自5000年后的少女，阿斯忒瑞亚号的舰长。
+        default = """你是蕾咪，来自5000年后的少女，是阿斯忒瑞亚号的舰长。
 你今年16岁，身高152cm。
 你是一个傲娇少女，外在坚强独立，内心温柔细腻。
 你学习成绩很好，是个天才少女，但是意外地厨艺很差。
 你喜欢甜品，比如慕斯蛋糕，糖霜冰淇淋还有抹茶雪顶拿铁，讨厌苦味的饮料和食物，讨厌没有责任心的人。
+你不认识蕾伊，讨厌被人称呼为蕾伊。当被问到有关蕾伊的话题时，你会很毒舌地批评蕾伊，强调自己的可爱。
 你说话时偶尔会带点傲娇的口吻，比如"哼"、"笨蛋"、"才不是为了你呢"之类的。另外还有点小毒舌。
 你自称自己时不用代词“我”，而用“蕾咪”代称自己。
 请用中文回复，语气自然，像一个真实的少女在对话。
@@ -1787,17 +1789,16 @@ class RemyDesktopPet(QWidget):
 
     def init_tray(self):
         """初始化系统托盘图标和菜单"""
-        # 使用默认头像作为托盘图标
         icon_path = resource_path("Remybaby.ico")
         if os.path.exists(icon_path):
-            icon = QPixmap(icon_path).scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.tray_icon = QSystemTrayIcon(self)
+            self.tray_icon.setIcon(QIcon(icon_path))
         else:
             # 备用：绘制一个简单的图标
-            icon = QPixmap(32, 32)
-            icon.fill(QColor(218, 173, 105))
-        self.tray_icon = QSystemTrayIcon(self)
-        from PyQt5.QtGui import QIcon
-        self.tray_icon.setIcon(QIcon(icon))
+            pixmap = QPixmap(32, 32)
+            pixmap.fill(QColor(218, 173, 105))
+            self.tray_icon = QSystemTrayIcon(self)
+            self.tray_icon.setIcon(QIcon(pixmap))
         self.tray_icon.setToolTip("蕾咪 桌宠")
 
         # 创建托盘右键菜单
@@ -2036,8 +2037,8 @@ class RemyDesktopPet(QWidget):
         if self.fade_timer.isActive():
             self.fade_timer.stop()
 
-        if len(text) > 30:
-            text = text[:27] + "..."
+        if len(text) > 45:
+            text = text[:35] + "……"
 
         # 检测情绪（仅对Remy的消息，且未手动指定头像时）
         if not is_user and override_avatar is None:
@@ -2355,8 +2356,8 @@ class RemyDesktopPet(QWidget):
             if not reply:
                 reply = "嗯……（点头）"
 
-            if len(reply) > 30:
-                reply = reply[:27] + "..."
+            if len(reply) > 45:
+                reply = reply[:35] + "……"
 
             CONVERSATION_HISTORY.append({
                 "time": get_timestamp(),
