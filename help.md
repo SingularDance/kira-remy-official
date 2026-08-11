@@ -1,3 +1,7 @@
+# Github开源社区
+
+该项目可在github开源社区访问：[github.com/SingularDance/kira-remy-official](https://github.com/SingularDance/kira-remy-official)
+
 ## 首次使用 — API 配置指南
 
 蕾咪需要连接 AI 才能聊天。密钥写在项目目录的 **config.json** 里，不要写进代码。
@@ -15,20 +19,23 @@
 
 ### 去哪里免费拿 Key
 
-**推荐：DeepSeek**（手机号注册、国内直连）
+目前支持的选择：
+
+**1.DeepSeek**（手机号注册、国内直连）
 
 1. 打开 [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys)
-2. 注册 → 创建 API Key → 复制
+2. 注册 → 创建 API Key → 复制（DeepSeek拿到key以后需要充值才好用）
 3. 填进 `config.json`，或在窗口主线路选 DeepSeek 后粘贴
 
-**备选：通义千问**（阿里云百炼）
+**2.通义千问**（阿里云百炼）
 
 1. 打开 [bailian.console.aliyun.com](https://bailian.console.aliyun.com/?tab=api#/api-key)
-2. 开通服务 → 创建 Key → 复制
+2. 开通服务 → 创建 Key → 复制（阿里的拿到key以后不需要充值就能用，至少初期不需要）
 3. 填进配置，或在窗口里选通义千问
 
-> 建议主线路用 DeepSeek，备用用通义千问。主线路挂了会自动切换。
+> 请自行选择哪个模型是主线路，哪个模型是备用线路。主线路挂了会自动切换。
 > `config.json` 含密钥，请勿发给别人，也不要提交到 Git。
+
 
 ## 嗨！我是蕾咪，来自5000年后哦！
 
