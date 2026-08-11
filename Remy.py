@@ -36,7 +36,7 @@ import requests
 import pyperclip
 
 # ============================================================
-# 【API 供应商配置表】- 免费 OpenAI 兼容供应商
+# 【API 供应商配置表】-  OpenAI 兼容供应商
 # 密钥不在这里填！请编辑 config.json（见 config.example.json）
 # ============================================================
 API_PROVIDERS = {
@@ -69,7 +69,7 @@ SYSTEM_PROMPT = """你是蕾咪，来自5000年后的少女，是阿斯忒瑞亚
 你说话时偶尔会带点傲娇的口吻，比如"哼"、"笨蛋"、"才不是为了你呢"之类的。另外还有点小毒舌。
 你自称自己时不用代词“我”，而用“蕾咪”代称自己。
 请用中文回复，语气自然，像一个真实的少女在对话。
-回复内容控制在30字以内的完整句子，简洁明了。不要使用括号内的补充说明。"""
+【重要】你的每次回复必须是一条37字以内的完整句子。如果一句话在37字内说不完，就换一种更简短的方式表达。禁止使用括号或引号补充说明。宁可说短一点，也不能把话说一半。"""
 
 # ============================================================
 # 【硬编码表情台词】- 点击头像随机切换表情时使用
@@ -102,17 +102,79 @@ def resource_path(relative_path):
     try:
         base_path = sys._MEIPASS
     except Exception:
-        base_path = os.path.abspath(".")
+        # 使用脚本所在目录作为基准路径，而非当前工作目录
+        base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
 
 
+def smart_truncate(text, max_chars=37):
+    """把回复截成不超过 max_chars 个字符的自然短句。
+    优先保留完整句子；否则在分句处截断并加省略号；最后兜底补省略号。
+    """
+    text = (text or "").strip()
+    if len(text) <= max_chars:
+        return text
+
+    # 第一优先：句末标点（。！？…~等）——完整句子，不加省略号
+    sentence_end = "。！？…;!?~～"
+    best = 0
+    for i, ch in enumerate(text[:max_chars]):
+        if ch in sentence_end:
+            best = i + 1
+    if best:
+        return text[:best]
+
+    # 第二优先：逗号等分句处——截断后补省略号
+    clause_end = "，、,"
+    best = 0
+    for i, ch in enumerate(text[:max_chars]):
+        if ch in clause_end:
+            best = i + 1
+    if best:
+        prefix = text[:best].rstrip("，、, ")
+        if len(prefix) + 2 > max_chars:
+            prefix = prefix[:max_chars - 2]
+        return prefix + "……"
+
+    # 兜底：整句无任何停顿——去掉末两字补省略号，避免腰斩观感
+    return text[:max_chars - 2] + "……"
+
+
 def markdown_to_html(text):
-    """将 Markdown 文本转换为 HTML，支持基础语法"""
+    """将 Markdown 文本转换为 HTML，支持表格、图片等语法"""
     import re as _re
     lines = text.split('\n')
     result = []
     in_list = None       # 'ul' or 'ol' or None
     in_blockquote = False
+    in_table = False
+    table_rows = []      # [(cells, is_header), ...]
+
+    def close_blocks():
+        nonlocal in_list, in_blockquote
+        if in_list:
+            result.append(f'</{in_list}>')
+            in_list = None
+        if in_blockquote:
+            result.append('</blockquote>')
+            in_blockquote = False
+
+    def flush_table():
+        nonlocal in_table, table_rows
+        if table_rows:
+            if not in_table:
+                result.append('<table>')
+                in_table = True
+            for cells, is_header in table_rows:
+                tag = 'th' if is_header else 'td'
+                row = '<tr>' + ''.join(
+                    f'<{tag}>{_inline_markdown(c)}</{tag}>' for c in cells
+                ) + '</tr>'
+                result.append(row)
+            table_rows = []
+        if in_table:
+            result.append('</table>')
+            in_table = False
 
     i = 0
     while i < len(lines):
@@ -121,34 +183,50 @@ def markdown_to_html(text):
 
         # 空行处理
         if not stripped:
-            if in_list:
-                result.append(f'</{in_list}>')
-                in_list = None
-            if in_blockquote:
-                result.append('</blockquote>')
-                in_blockquote = False
+            flush_table()
+            close_blocks()
             i += 1
             continue
 
+        # 表格行检测（必须以 | 开头和结尾）
+        if stripped.startswith('|') and stripped.endswith('|'):
+            cells = [c.strip() for c in stripped[1:-1].split('|')]
+            # 分隔行 |---|---|
+            is_sep = all(_re.match(r'^:?-{2,}:?$', c.strip()) for c in cells)
+            if is_sep:
+                # 上一行变为表头
+                if table_rows:
+                    cells_h, _ = table_rows[0]
+                    table_rows[0] = (cells_h, True)
+                i += 1
+                continue
+
+            close_blocks()
+            table_rows.append((cells, False))
+            i += 1
+            continue
+
+        # 非表格行 → 先关闭表格
+        flush_table()
+
         # 水平分隔线 ---
         if stripped in ('---', '***', '___'):
-            if in_list:
-                result.append(f'</{in_list}>')
-                in_list = None
-            if in_blockquote:
-                result.append('</blockquote>')
-                in_blockquote = False
+            close_blocks()
             result.append('<hr>')
             i += 1
             continue
 
-        # 标题 ### / ##
+        # 标题 # / ## / ###
         if stripped.startswith('### '):
             result.append(f'<h3>{_inline_markdown(stripped[4:])}</h3>')
             i += 1
             continue
         if stripped.startswith('## '):
             result.append(f'<h2>{_inline_markdown(stripped[3:])}</h2>')
+            i += 1
+            continue
+        if stripped.startswith('# '):
+            result.append(f'<h1>{_inline_markdown(stripped[2:])}</h1>')
             i += 1
             continue
 
@@ -159,6 +237,22 @@ def markdown_to_html(text):
                 in_blockquote = True
             result.append(f'<p>{_inline_markdown(stripped[2:])}</p>')
             i += 1
+            continue
+
+        # 围栏代码块 ```
+        if stripped.startswith('```'):
+            flush_table()
+            close_blocks()
+            code_lines = []
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith('```'):
+                code_lines.append(lines[i])
+                i += 1
+            # HTML 转义 + 保留缩进
+            code_text = '\n'.join(code_lines)
+            code_text = code_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            result.append(f'<pre><code>{code_text}</code></pre>')
+            i += 1  # 跳过闭合 ```
             continue
 
         # 有序列表 1. / 2. 等
@@ -189,17 +283,41 @@ def markdown_to_html(text):
         i += 1
 
     # 关闭未闭合的标签
-    if in_list:
-        result.append(f'</{in_list}>')
-    if in_blockquote:
-        result.append('</blockquote>')
+    flush_table()
+    close_blocks()
 
     return '\n'.join(result)
 
 
 def _inline_markdown(text):
-    """转换行内 Markdown：**粗体**, [链接](url), `代码`"""
+    """转换行内 Markdown：![图片](path), **粗体**, [链接](url), `代码`"""
     import re
+    import base64
+
+    # 图片 ![alt](path) — 必须在链接之前处理，否则 [alt](url) 会先被转为 <a>
+    def _replace_image(m):
+        alt = m.group(1)
+        path = m.group(2)
+        # 跳过外部 URL
+        if path.startswith(('http://', 'https://', 'data:')):
+            return f'<img src="{path}" alt="{alt}" />'
+        # 本地文件 → base64 嵌入 QTextBrowser
+        try:
+            full_path = resource_path(path)
+            if os.path.exists(full_path):
+                with open(full_path, 'rb') as f:
+                    data = base64.b64encode(f.read()).decode()
+                ext = os.path.splitext(path)[1].lower().lstrip('.')
+                mime_map = {'png': 'png', 'jpg': 'jpeg', 'jpeg': 'jpeg',
+                            'gif': 'gif', 'webp': 'webp', 'bmp': 'bmp', 'svg': 'svg+xml'}
+                mime = mime_map.get(ext, 'png')
+                return f'<img src="data:image/{mime};base64,{data}" alt="{alt}" />'
+        except Exception:
+            pass
+        return f'<span style="color:#cc5555;">[图片缺失: {alt}]</span>'
+
+    text = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', _replace_image, text)
+
     # 粗体 **text**
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     # 链接 [text](url)
@@ -214,7 +332,7 @@ def _inline_markdown(text):
 def default_config():
     """默认配置。密钥请写在 config.json，模板见 config.example.json。"""
     return {
-        "nickname": "御主",
+        "nickname": "调查员",
         "call_me": "你",
         "relationship": "朋友",
         "master_birthday": "2000-01-01",
@@ -310,11 +428,11 @@ def save_note(text):
 def get_system_prompt():
     base = SYSTEM_PROMPT
     master_info = f"""
-【御主档案】
-- 昵称：{CONFIG.get('nickname', '御主')}
+【调查员档案】
+- 昵称：{CONFIG.get('nickname', '调查员')}
 - 对我的称呼：{CONFIG.get('call_me', '你')}
 - 我们之间的关系：{CONFIG.get('relationship', '朋友')}
-- 御主性别：{CONFIG.get('master_gender', '未知')}
+- 调查员性别：{CONFIG.get('master_gender', '未知')}
 
 请根据以上档案信息，以合适的称呼和语气与我对话。
 """
@@ -541,6 +659,15 @@ class HelpDialog(QDialog):
         color: #333333;
         padding: 8px 12px;
     }}
+    h1 {{
+        color: #DAAD69;
+        font-size: 22px;
+        font-weight: bold;
+        border-bottom: 3px solid #DAAD69;
+        padding-bottom: 8px;
+        margin-top: 24px;
+        margin-bottom: 14px;
+    }}
     h2 {{
         color: #DAAD69;
         font-size: 18px;
@@ -595,6 +722,51 @@ class HelpDialog(QDialog):
         border-radius: 3px;
         font-size: 13px;
     }}
+    pre {{
+        background-color: #f5f5f5;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        padding: 12px 16px;
+        overflow-x: auto;
+        font-family: "Consolas", "Courier New", monospace;
+        font-size: 13px;
+        line-height: 1.6;
+        margin: 10px 0;
+        white-space: pre-wrap;
+    }}
+    pre code {{
+        background: none;
+        padding: 0;
+        font-size: inherit;
+    }}
+    table {{
+        border-collapse: collapse;
+        width: 100%;
+        margin: 10px 0;
+        font-size: 13px;
+    }}
+    th {{
+        background-color: #DAAD69;
+        color: #1a1a1a;
+        padding: 8px 12px;
+        border: 1px solid #c09050;
+        text-align: left;
+        font-weight: bold;
+    }}
+    td {{
+        padding: 6px 12px;
+        border: 1px solid #ddd;
+        color: #333333;
+    }}
+    tr:nth-child(even) td {{
+        background-color: #fafaf5;
+    }}
+    img {{
+        max-width: 100%;
+        height: auto;
+        border-radius: 8px;
+        margin: 8px 0;
+    }}
 </style></head><body>{body}</body></html>'''
 
 class SettingsDialog(QDialog):
@@ -612,7 +784,7 @@ class SettingsDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
         
-        desc = QLabel("修改下方内容可即时改变角色性格、称呼和语言风格。保存后将清空对话上下文。")
+        desc = QLabel("修改下方内容可即时改变蕾咪性格、称呼和语言风格。保存后将清空对话上下文。")
         desc.setStyleSheet("color: #888888; font-size: 12px; padding: 0 10px 10px 10px;")
         desc.setWordWrap(True)
         layout.addWidget(desc)
@@ -673,20 +845,20 @@ class SettingsDialog(QDialog):
 你说话时偶尔会带点傲娇的口吻，比如"哼"、"笨蛋"、"才不是为了你呢"之类的。另外还有点小毒舌。
 你自称自己时不用代词“我”，而用“蕾咪”代称自己。
 请用中文回复，语气自然，像一个真实的少女在对话。
-回复内容控制在30字以内的完整句子，简洁明了。不要使用括号内的补充说明。"""
+【重要】你的每次回复必须是一条37字以内的完整句子。如果一句话在37字内说不完，就换一种更简短的方式表达。禁止使用括号或引号补充说明。宁可说短一点，也不能把话说一半。"""
         self.text_edit.setPlainText(default)
 
 class MasterProfileDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("👤 御主档案")
+        self.setWindowTitle("👤 调查员档案")
         self.setGeometry(200, 200, 400, 350)
         self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: Microsoft YaHei;")
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout()
-        title = QLabel("👤 御主档案")
+        title = QLabel("👤 调查员档案")
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #DAAD69; padding: 10px;")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
@@ -705,7 +877,7 @@ class MasterProfileDialog(QDialog):
         form_layout.addRow("生日:", self.birthday_input)
         
         self.call_input = QLineEdit(CONFIG.get('call_me', '你'))
-        self.call_input.setPlaceholderText("如: 御主、笨蛋、主人...")
+        self.call_input.setPlaceholderText("如: 调查员、主人...")
         self.call_input.setStyleSheet("background-color: #f5f5f5; border: 1px solid #333333; border-radius: 5px; padding: 5px; color: #333333;")
         form_layout.addRow("对我的称呼:", self.call_input)
         
@@ -737,7 +909,7 @@ class MasterProfileDialog(QDialog):
 
     def save_profile(self):
         global CONFIG
-        CONFIG['nickname'] = self.nickname_input.text().strip() or '御主'
+        CONFIG['nickname'] = self.nickname_input.text().strip() or '调查员'
         CONFIG['master_birthday'] = self.birthday_input.text().strip() or '2000-01-01'
         CONFIG['call_me'] = self.call_input.text().strip() or '你'
         CONFIG['relationship'] = self.relationship_input.text().strip() or '朋友'
@@ -745,7 +917,7 @@ class MasterProfileDialog(QDialog):
         
         save_config()
         
-        QMessageBox.information(self, "成功", "✅ 御主档案已保存！")
+        QMessageBox.information(self, "成功", "✅ 调查员档案已保存！")
         self.accept()
 
 class NoteDialog(QDialog):
@@ -885,7 +1057,7 @@ class RPSDialog(QDialog):
             result = "你赢了！"
             emoji = "🎉"
         else:
-            result = "Remy赢了！"
+            result = "蕾咪赢了！"
             emoji = "😤"
         
         self.result_label.setText(
@@ -1216,7 +1388,7 @@ class Game2048Dialog(QDialog):
                 self.won = True
                 reply = QMessageBox.question(
                     self, "🎉 恭喜！",
-                    "你成功达到了 2048！\n\n太厉害了！要不要继续挑战更高的分数？",
+                    "你成功达到了 2048！\n\n太厉害了！是否继续挑战更高的分数？",
                     QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
                 )
                 if reply == QMessageBox.Yes:
@@ -1228,7 +1400,7 @@ class Game2048Dialog(QDialog):
             # 检查游戏结束
             if self.check_game_over():
                 QMessageBox.information(
-                    self, "😵 游戏结束",
+                    self, "游戏结束",
                     f"没有可用的移动了！\n\n最终分数: {self.score}"
                 )
 
@@ -1315,8 +1487,8 @@ class APISettingsDialog(QDialog):
         layout.addWidget(title)
 
         desc = QLabel(
-            "蕾咪需要连接 AI 才能聊天。\n"
-            "可在下方填写，或直接编辑项目目录里的 config.json。\n"
+            "蕾咪需要连接 AI 才能聊天哦。请在主线路中配置您的API Key。\n"
+            "可在此页面中填写，或直接编辑项目目录里的 config.json。\n"
             "模板见 config.example.json（复制后改名为 config.json）。"
         )
         desc.setStyleSheet("color: #666666; font-size: 13px; padding: 0 10px;")
@@ -1398,7 +1570,7 @@ class APISettingsDialog(QDialog):
         key_layout.addWidget(show_btn)
         pg_form.addRow("API Key:", key_layout)
 
-        primary_help_btn = QPushButton("📖 如何免费获取 API Key？")
+        primary_help_btn = QPushButton("📖 如何获取 API Key？")
         primary_help_btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
@@ -1490,7 +1662,7 @@ class APISettingsDialog(QDialog):
         bk_layout.addWidget(show_btn2)
         bg_form.addRow("API Key:", bk_layout)
 
-        backup_help_btn = QPushButton("📖 如何免费获取 API Key？")
+        backup_help_btn = QPushButton("📖 如何获取 API Key？")
         backup_help_btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
@@ -1568,7 +1740,7 @@ class APISettingsDialog(QDialog):
     def toggle_key_visibility(self, input_field, btn):
         if input_field.echoMode() == QLineEdit.Password:
             input_field.setEchoMode(QLineEdit.Normal)
-            btn.setText("🙈")
+            btn.setText("😣")
         else:
             input_field.setEchoMode(QLineEdit.Password)
             btn.setText("👁")
@@ -1658,6 +1830,7 @@ class RemyDesktopPet(QWidget):
         self.is_processing_message = False
         self.message_queue = []
         self.is_sleeping = False  # 睡眠状态
+        self.last_idle_chat_time = 0  # 上次闲聊时间，防止连续触发（独立于交互计时器）
         self.last_emotion_shown = None  # 追踪上一次显示的表情，防止连续重复
         
         self.drag_pos = None
@@ -1789,15 +1962,33 @@ class RemyDesktopPet(QWidget):
 
     def init_tray(self):
         """初始化系统托盘图标和菜单"""
+        self.tray_icon = QSystemTrayIcon(self)
+
         icon_path = resource_path("Remybaby.ico")
+        tray_icon_loaded = False
+
+        # 尝试加载 ICO 文件（通过 QPixmap 更可靠，能处理 PNG 压缩的现代 ICO）
         if os.path.exists(icon_path):
-            self.tray_icon = QSystemTrayIcon(self)
-            self.tray_icon.setIcon(QIcon(icon_path))
-        else:
-            # 备用：绘制一个简单的图标
+            pixmap = QPixmap(icon_path)
+            if not pixmap.isNull():
+                # 缩放到系统托盘标准尺寸 32x32
+                scaled = pixmap.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.tray_icon.setIcon(QIcon(scaled))
+                tray_icon_loaded = True
+
+        # 备用：绘制一个简单的 Remy 头像图标
+        if not tray_icon_loaded:
             pixmap = QPixmap(32, 32)
-            pixmap.fill(QColor(218, 173, 105))
-            self.tray_icon = QSystemTrayIcon(self)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(QPen(QColor(218, 173, 105), 2))
+            painter.setBrush(QBrush(QColor(218, 173, 105)))
+            painter.drawEllipse(4, 4, 24, 24)
+            painter.setPen(QPen(QColor(51, 51, 51)))
+            painter.setFont(QFont("Microsoft YaHei", 8))
+            painter.drawText(QRect(0, 0, 32, 32), Qt.AlignCenter, "R")
+            painter.end()
             self.tray_icon.setIcon(QIcon(pixmap))
         self.tray_icon.setToolTip("蕾咪 桌宠")
 
@@ -2017,16 +2208,17 @@ class RemyDesktopPet(QWidget):
             self.last_interaction_time = time.time()
             self.show_typed_message("嗯...？你找我吗？", is_user=False)
 
-    def show_typed_message(self, text, is_user=False, override_avatar=None):
+    def show_typed_message(self, text, is_user=False, override_avatar=None, skip_wake=False):
         """显示打字机效果的消息 - 支持消息队列和情绪检测
-        override_avatar 不为 None 时，使用指定头像并跳过情绪检测"""
+        override_avatar 不为 None 时，使用指定头像并跳过情绪检测
+        skip_wake 为 True 时，睡眠状态下不唤醒（用于睡眠提示消息自身）"""
         # 如果正在处理消息，加入队列
         if self.is_processing_message:
             self.message_queue.append((text, is_user))
             return
-        
-        # 唤醒（如果不是睡眠状态）
-        if self.is_sleeping:
+
+        # 唤醒（睡眠提示消息自身除外）
+        if self.is_sleeping and not skip_wake:
             self.wake_up()
         
         # 开始处理新消息
@@ -2037,8 +2229,8 @@ class RemyDesktopPet(QWidget):
         if self.fade_timer.isActive():
             self.fade_timer.stop()
 
-        if len(text) > 45:
-            text = text[:35] + "……"
+        if not is_user and len(text) > 37:
+            text = smart_truncate(text)
 
         # 检测情绪（仅对Remy的消息，且未手动指定头像时）
         if not is_user and override_avatar is None:
@@ -2253,7 +2445,7 @@ class RemyDesktopPet(QWidget):
 
         CONVERSATION_HISTORY.append({
             "time": get_timestamp(),
-            "role": "御主",
+            "role": "调查员",
             "content": user_input
         })
         save_conversation()
@@ -2265,7 +2457,7 @@ class RemyDesktopPet(QWidget):
         try:
             messages = [{"role": "system", "content": get_system_prompt()}]
             for entry in CONVERSATION_HISTORY[-20:]:
-                role = "user" if entry["role"] == "御主" else "assistant"
+                role = "user" if entry["role"] == "调查员" else "assistant"
                 messages.append({"role": role, "content": entry["content"]})
 
             api_cfg = CONFIG.get("api", {})
@@ -2301,7 +2493,7 @@ class RemyDesktopPet(QWidget):
                     "model": model,
                     "messages": messages,
                     "temperature": 0.8,
-                    "max_tokens": 50
+                    "max_tokens": 48
                 }
 
                 print(f"[Remy Debug] [{label}] Calling API: {url}")
@@ -2354,10 +2546,13 @@ class RemyDesktopPet(QWidget):
             reply = reply.strip()
 
             if not reply:
-                reply = "嗯……（点头）"
+                reply = "嗯……"
 
-            if len(reply) > 45:
-                reply = reply[:35] + "……"
+            # 如果使用了备用线路，先把前缀拼好再统一截断
+            if used_fallback:
+                reply = f"（备用线路）{reply}"
+
+            reply = smart_truncate(reply, max_chars=37)
 
             CONVERSATION_HISTORY.append({
                 "time": get_timestamp(),
@@ -2365,10 +2560,6 @@ class RemyDesktopPet(QWidget):
                 "content": reply
             })
             save_conversation()
-
-            # 如果使用了备用线路，在回复前缀加提示
-            if used_fallback:
-                reply = f"（已切换至{provider_name}）" + reply
 
             self.show_typed_message(reply, is_user=False)
         except Exception as e:
@@ -2396,22 +2587,26 @@ class RemyDesktopPet(QWidget):
                 self.is_sleeping = True
                 self.last_interaction_time = time.time()  # 防止连续触发
                 self.set_avatar('Remy_Sleep.png')
-                # 显示睡眠提示
-                self.show_typed_message("💤 好困……蕾咪先睡一会儿……", is_user=False)
+                # 显示睡眠提示（skip_wake=True 防止消息自身唤醒蕾咪）
+                self.show_typed_message("好困……蕾咪先睡一会儿……", is_user=False, skip_wake=True)
 
         # 5分钟闲聊逻辑（但只在非睡眠状态）
         elif not self.is_sleeping and idle_seconds > 300:
+            # 用独立变量控制闲聊间隔，不重置 last_interaction_time
+            # 否则 10 分钟睡眠计时器会被每 5 分钟归零，永远无法触发
+            if time.time() - self.last_idle_chat_time < 300:
+                return
+            self.last_idle_chat_time = time.time()
+
             idle_messages = [
-                "你还在忙吗？都好久没理我了……",
-                "哼，我就知道你又沉迷工作了！",
-                "喂，我在这里很无聊诶……",
-                "要不要休息一下？我给你泡杯茶？",
-                "你该不会把我忘了吧！",
+                "你还在忙吗？都好久没理蕾咪了……",
+                "哼，蕾咪就知道你又沉迷工作了！",
+                "喂，蕾咪在这里很无聊诶……",
+                "要不要休息一下？蕾咪给你泡杯茶？",
+                "你该不会把蕾咪忘了吧！",
                 "这个时代的人真是工作狂……"
             ]
             msg = random.choice(idle_messages)
-
-            self.last_interaction_time = time.time()  # 防止连续触发
 
             CONVERSATION_HISTORY.append({
                 "time": get_timestamp(),
@@ -2468,7 +2663,7 @@ class RemyDesktopPet(QWidget):
         menu.addAction("📖 帮助/说明").triggered.connect(self.open_help)
         menu.addAction("⚙️ 核心设定").triggered.connect(self.open_settings)
         menu.addAction("🔑 API 设置").triggered.connect(self.open_api_settings)
-        menu.addAction("👤 御主档案").triggered.connect(self.open_master_profile)
+        menu.addAction("👤 调查员档案").triggered.connect(self.open_master_profile)
         menu.addSeparator()
         menu.addAction("📝 记一笔").triggered.connect(self.open_note)
         
@@ -2555,7 +2750,7 @@ class RemyDesktopPet(QWidget):
         self.hide()
         self.tray_icon.showMessage(
             "Remy 桌宠",
-            "Remy 已最小化到系统托盘，右键托盘图标可退出",
+            "蕾咪已最小化到系统托盘，右键托盘图标可退出",
             QSystemTrayIcon.Information,
             2000
         )

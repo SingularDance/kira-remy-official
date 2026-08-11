@@ -6,7 +6,7 @@
     "4. config.json 含密钥，已被 .gitignore 忽略，请勿提交到 Git",
     "5. 也可以启动后在弹窗里填写；保存后同样写入 config.json"
   ],
-  "nickname": "御主",
+  "nickname": "调查员",
   "call_me": "你",
   "relationship": "朋友",
   "master_birthday": "2000-01-01",
