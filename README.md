@@ -70,15 +70,33 @@
 
 ```text
 kira-remy-official/
-├── Remy.py                 # 主程序
-├── config.example.json     # 配置模板（提交到仓库）
-├── config.json             # 你的本地配置（含密钥，勿提交）
-├── Remy_*.png              # 表情立绘
-├── Remybaby.ico            # 图标
-├── help.md                 # 应用内说明书
-├── shortcuts.json          # 快捷程序 / 书签
+├── Remy.py                  # 入口（单实例检测 + 启动）
+├── config.py                # 配置管理 & 全局状态（钥匙、人设、对话历史）
+├── utils.py                 # 纯工具函数（截断、Markdown渲染、情绪检测）
+├── desktop_pet.py           # 桌宠主窗口（UI、拖拽、API、托盘、空闲检测）
+│
+├── dialogs/                 # 对话框包
+│   ├── __init__.py
+│   ├── history.py           # 历史记录
+│   ├── help_dialog.py       # 帮助说明
+│   ├── settings.py          # 核心设定修改
+│   ├── master_profile.py    # 调查员档案
+│   ├── note.py              # 笔记
+│   ├── api_settings.py      # API 设置
+│   └── games/               # 🎮 小游戏（各自独立）
+│       ├── __init__.py
+│       ├── rps.py           # 猜拳
+│       ├── game_2048.py     # 2048
+│       └── dice.py          # 掷骰子
+│
+├── config.example.json      # 配置模板（提交到仓库）
+├── config.json              # 你的本地配置（含密钥，勿提交）
+├── Remy_*.png               # 表情立绘
+├── Remybaby.ico             # 图标
+├── help.md                  # 应用内说明书
+├── shortcuts.json           # 快捷程序 / 书签
 ├── install.bat / run.bat / pack.bat
-├── 星夜颂歌-蕾咪！.spec
+├── 星夜颂歌-蕾咪！.spec     # PyInstaller 打包配置
 └── README.md
 ```
 
@@ -112,15 +130,17 @@ python -m pip install PyQt5 requests pyperclip pyinstaller
 
 ### 常见改动入口
 
-| 想改什么          | 看哪里                                                  |
-| ----------------- | ------------------------------------------------------- |
-| 性格 / 人设提示词 | `Remy.py` 里的 `SYSTEM_PROMPT`                      |
-| 表情点击台词      | `EMOTION_PHRASES`                                     |
-| 拖拽松手台词      | `DRAG_RELEASE_PHRASES`                                |
-| AI 供应商列表     | `API_PROVIDERS`                                       |
-| 密钥与个人档案    | `config.json`（模板：`config.example.json`）        |
-| 快捷方式          | `shortcuts.json`                                      |
-| 立绘资源          | `Remy_*.png`（改了记得同步 `pack.bat` / `.spec`） |
+| 想改什么          | 看哪里                                                |
+| ----------------- | ----------------------------------------------------- |
+| 性格 / 人设提示词 | `config.py` 里的 `SYSTEM_PROMPT`                      |
+| 表情点击台词      | `config.py` 里的 `EMOTION_PHRASES`                     |
+| 拖拽松手台词      | `config.py` 里的 `DRAG_RELEASE_PHRASES`                |
+| AI 供应商列表     | `config.py` 里的 `API_PROVIDERS`                       |
+| 密钥与个人档案    | `config.json`（模板：`config.example.json`）           |
+| 快捷方式          | `shortcuts.json`                                       |
+| 立绘资源          | `Remy_*.png`（改了记得同步 `pack.bat` / `.spec`）      |
+| 对话框 / 小游戏   | `dialogs/` 下对应文件（小游戏在 `dialogs/games/`）     |
+| 桌宠交互逻辑      | `desktop_pet.py`                                       |
 
 ### 小约定
 
