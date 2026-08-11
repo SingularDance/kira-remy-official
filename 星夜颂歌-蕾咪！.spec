@@ -5,7 +5,7 @@ a = Analysis(
     ['Remy.py'],
     pathex=[],
     binaries=[],
-    datas=[('Remy_Shut.png', '.'), ('Remy_Open.png', '.'), ('Remy_Angry.png', '.'), ('Remy_Expect.png', '.'), ('Remy_Wronged.png', '.'), ('Remy_Happy.png', '.'), ('Remy_Sleep.png', '.'), ('Remy_Dangle.png', '.'), ('shortcuts.json', '.'), ('help.md', '.'), ('config.example.json', '.')],
+    datas=[('Remy_Shut.png', '.'), ('Remy_Open.png', '.'), ('Remy_Angry.png', '.'), ('Remy_Expect.png', '.'), ('Remy_Wronged.png', '.'), ('Remy_Happy.png', '.'), ('Remy_Sleep.png', '.'), ('Remy_Dangle.png', '.'), ('shortcuts.json', '.'), ('help.md', '.'), ('config.example.json', '.'), ('Remybaby.ico', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

@@ -25,6 +25,7 @@ python -m PyInstaller --onefile --windowed --name "星夜颂歌-蕾咪！" ^
     --add-data "shortcuts.json;." ^
     --add-data "help.md;." ^
     --add-data "config.example.json;." ^
+    --add-data "Remybaby.ico;." ^
     Remy.py
 
 if %errorlevel% == 0 (
