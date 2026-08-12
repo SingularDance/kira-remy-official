@@ -6,37 +6,63 @@ Remy 桌宠 - 主窗口 RemyDesktopPet
 空闲检测、系统托盘、右键菜单。
 """
 
-import sys
-import os
 import json
-import time
+import os
 import random
-import threading
-import subprocess
-import webbrowser
 import re
+import subprocess
+import threading
+import time
+import webbrowser
 
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
-    QPushButton, QMenu, QSystemTrayIcon, QLineEdit, QSizePolicy,
-    QGraphicsOpacityEffect, QMessageBox
+    QApplication,
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QPushButton,
+    QSizePolicy,
+    QSystemTrayIcon,
+    QVBoxLayout,
+    QWidget,
 )
 from PyQt5.QtCore import (
-    Qt, QTimer, QRect, QPropertyAnimation, QMetaObject, Q_ARG, pyqtSlot,
-    QSharedMemory
+    Q_ARG,
+    QMetaObject,
+    QPropertyAnimation,
+    QRect,
+    QTimer,
+    Qt,
+    pyqtSlot,
 )
 from PyQt5.QtGui import (
-    QPixmap, QFont, QColor, QPainter, QBrush, QPen, QIcon
+    QBrush,
+    QColor,
+    QFont,
+    QIcon,
+    QPainter,
+    QPen,
+    QPixmap,
+    QResizeEvent,
 )
-import requests
 import pyperclip
+import requests
 
 import config
-from utils import resource_path, smart_truncate, detect_emotion
 from dialogs import (
     HistoryDialog, HelpDialog, SettingsDialog, MasterProfileDialog,
     NoteDialog, RPSDialog, Game2048Dialog, DiceDialog, APISettingsDialog
 )
+from thinking import (
+    PREVIEW_MS,
+    ThinkingController,
+    apply_thinking_request,
+    extract_reasoning,
+    supports_thinking,
+)
+from utils import resource_path, smart_truncate, detect_emotion
 
 
 class RemyDesktopPet(QWidget):
@@ -78,6 +104,8 @@ class RemyDesktopPet(QWidget):
         self.emotion_queue_index = 0  # 当前队列位置
         self.last_interaction_time = time.time()
         self._process_start_time = 0  # 用于防御性超时检测
+        self._pending_reply = ""
+        self.thinking = ThinkingController(self)
         self.fade_timer = QTimer()
         self.type_timer = QTimer()
         self.type_text = ""
@@ -193,9 +221,27 @@ class RemyDesktopPet(QWidget):
         main_layout.addLayout(input_layout)
         self.setLayout(main_layout)
 
+        self.thinking.bind_avatar(self.avatar_label)
+
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
         self.setWindowOpacity(0.95)
+
+    @pyqtSlot(str)
+    def show_thinking_bubble(self, text: str) -> None:
+        self.thinking.show_preview(text)
+
+    @pyqtSlot(str)
+    def update_thinking_bubble(self, text: str) -> None:
+        self.thinking.update_streaming_preview(text)
+
+    @pyqtSlot()
+    def hide_thinking_bubble(self) -> None:
+        self.thinking.hide()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.thinking.on_resize()
 
     def init_tray(self):
         """初始化系统托盘图标和菜单"""
@@ -389,6 +435,8 @@ class RemyDesktopPet(QWidget):
         # 隐藏气泡
         self.bubble_label.hide()
         self.bubble_label.setText("")
+        self.thinking.hide()
+        self._pending_reply = ""
         # 清空消息队列
         self.message_queue.clear()
         # 重置所有状态
@@ -544,7 +592,7 @@ class RemyDesktopPet(QWidget):
 
         try:
             self.type_timer.timeout.disconnect()
-        except:
+        except (TypeError, RuntimeError):
             pass
         self.type_timer.timeout.connect(self.type_char)
         self.type_timer.start(80)
@@ -638,6 +686,7 @@ class RemyDesktopPet(QWidget):
 
     def _on_fade_out_finished(self):
         """淡出动画完成后的清理"""
+        self.thinking.hide()
         self.bubble_label.hide()
         self.bubble_label.setText("")
         self.is_drag_releasing = False  # 解除拖拽保护
@@ -688,15 +737,21 @@ class RemyDesktopPet(QWidget):
 
         threading.Thread(target=self.call_api, args=(user_input,), daemon=True).start()
 
-    def call_api(self, user_input):
+    def call_api(self, user_input: str) -> None:
         """调用 AI API，支持主备线路自动故障切换"""
         try:
             messages = [{"role": "system", "content": config.get_system_prompt()}]
             for entry in config.CONVERSATION_HISTORY[-20:]:
+                if (
+                    entry["role"] == "Remy"
+                    and entry["content"].strip() == "嗯……"
+                ):
+                    continue
                 role = "user" if entry["role"] == "调查员" else "assistant"
                 messages.append({"role": role, "content": entry["content"]})
 
             api_cfg = config.CONFIG.get("api", {})
+            thinking_enabled = api_cfg.get("thinking_enabled") is True
 
             # 尝试主线路和备用线路
             for attempt in range(2):
@@ -725,30 +780,76 @@ class RemyDesktopPet(QWidget):
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
                 }
-                data = {
-                    "model": model,
-                    "messages": messages,
-                    "temperature": 0.8,
-                    "max_tokens": 48
-                }
+                data = apply_thinking_request(
+                    provider,
+                    {
+                        "model": model,
+                        "messages": messages,
+                        "temperature": 0.8,
+                        "max_tokens": 48,
+                    },
+                    enabled=thinking_enabled,
+                )
+                reasoning_streamed = (
+                    thinking_enabled and supports_thinking(provider)
+                )
+                timeout = 60 if reasoning_streamed else 30
+                if reasoning_streamed:
+                    QMetaObject.invokeMethod(
+                        self,
+                        "show_thinking_bubble",
+                        Qt.QueuedConnection,
+                        Q_ARG(str, "大脑在快速思考中..."),
+                    )
+                else:
+                    QMetaObject.invokeMethod(
+                        self,
+                        "hide_thinking_bubble",
+                        Qt.QueuedConnection,
+                    )
 
                 print(f"[Remy Debug] [{label}] Calling API: {url}")
                 print(f"[Remy Debug] [{label}] Model: {model}, Messages count: {len(messages)}")
 
+                response: requests.Response | None = None
                 try:
-                    response = requests.post(url, headers=headers, json=data, timeout=30)
+                    response = requests.post(
+                        url,
+                        headers=headers,
+                        json=data,
+                        timeout=timeout,
+                        stream=reasoning_streamed,
+                    )
                     print(f"[Remy Debug] [{label}] API response status: {response.status_code}")
 
                     if response.status_code == 200:
-                        result = json.loads(response.text)
-                        reply = result["choices"][0]["message"]["content"]
+                        if reasoning_streamed:
+                            reasoning, reply = self._consume_stream_response(
+                                response,
+                                label,
+                            )
+                        else:
+                            result = json.loads(response.text)
+                            message = result["choices"][0]["message"]
+                            reply = message.get("content") or ""
+                            reasoning = extract_reasoning(message)
                         print(f"[Remy Debug] [{label}] API reply: {reply}")
+                        if reasoning:
+                            print(
+                                f"[Remy Debug] [{label}] Reasoning preview: "
+                                f"{reasoning[:120]}"
+                            )
 
-                        QMetaObject.invokeMethod(self, "_on_api_success",
-                                               Qt.QueuedConnection,
-                                               Q_ARG(str, reply),
-                                               Q_ARG(bool, attempt == 1),
-                                               Q_ARG(str, provider["name"]))
+                        QMetaObject.invokeMethod(
+                            self,
+                            "_on_api_success",
+                            Qt.QueuedConnection,
+                            Q_ARG(str, reply),
+                            Q_ARG(str, reasoning),
+                            Q_ARG(bool, attempt == 1),
+                            Q_ARG(str, provider["name"]),
+                            Q_ARG(bool, reasoning_streamed),
+                        )
                         return
                     else:
                         print(f"[Remy Debug] [{label}] API error body: {response.text[:500]}")
@@ -761,6 +862,9 @@ class RemyDesktopPet(QWidget):
                     if attempt == 0:
                         print("[Remy Debug] 主线路异常，尝试备用线路...")
                         continue
+                finally:
+                    if response is not None:
+                        response.close()
 
             # 两条线路都失败
             raise Exception("所有API线路均失败，请检查网络连接和API Key配置")
@@ -771,24 +875,94 @@ class RemyDesktopPet(QWidget):
                                    Qt.QueuedConnection,
                                    Q_ARG(str, str(e)))
 
-    @pyqtSlot(str, bool, str)
-    def _on_api_success(self, reply, used_fallback, provider_name):
+    def _consume_stream_response(
+        self,
+        response: requests.Response,
+        label: str,
+    ) -> tuple[str, str]:
+        reasoning_parts: list[str] = []
+        reply_parts: list[str] = []
+
+        for raw_line in response.iter_lines(decode_unicode=True):
+            if not raw_line:
+                continue
+            if isinstance(raw_line, bytes):
+                line = raw_line.decode("utf-8", errors="replace")
+            else:
+                line = str(raw_line)
+            if not line.startswith("data:"):
+                continue
+
+            payload = line[5:].strip()
+            if payload == "[DONE]":
+                break
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError as error:
+                print(
+                    f"[Remy Debug] [{label}] Stream chunk parse error: "
+                    f"{error}"
+                )
+                continue
+
+            if not isinstance(chunk, dict):
+                continue
+            choices = chunk.get("choices", [])
+            if not isinstance(choices, list) or not choices:
+                continue
+            choice = choices[0]
+            if not isinstance(choice, dict):
+                continue
+            delta = choice.get("delta", {})
+            if not isinstance(delta, dict):
+                continue
+
+            reasoning_piece = delta.get("reasoning_content") or ""
+            reply_piece = delta.get("content") or ""
+            if isinstance(reasoning_piece, str) and reasoning_piece:
+                reasoning_parts.append(reasoning_piece)
+                reasoning = "".join(reasoning_parts)
+                QMetaObject.invokeMethod(
+                    self,
+                    "update_thinking_bubble",
+                    Qt.QueuedConnection,
+                    Q_ARG(str, reasoning),
+                )
+            if isinstance(reply_piece, str) and reply_piece:
+                reply_parts.append(reply_piece)
+
+        return "".join(reasoning_parts), "".join(reply_parts)
+
+    def _prepare_reply_text(self, reply: str, used_fallback: bool) -> str:
+        reply = re.sub(r'\([^)]*\)', '', reply or "")
+        reply = re.sub(r'（[^）]*）', '', reply)
+        reply = reply.strip()
+        if not reply:
+            reply = "嗯……"
+        if used_fallback:
+            reply = f"（备用线路）{reply}"
+        return smart_truncate(reply, max_chars=37)
+
+    def _deliver_pending_reply(self) -> None:
+        reply = self._pending_reply
+        self._pending_reply = ""
+        if reply:
+            self.show_typed_message(reply, is_user=False)
+
+    @pyqtSlot(str, str, bool, str, bool)
+    def _on_api_success(
+        self,
+        reply: str,
+        reasoning: str,
+        used_fallback: bool,
+        provider_name: str,
+        reasoning_streamed: bool,
+    ) -> None:
         """API 调用成功，处理回复"""
         try:
             print(f"[Remy Debug] API success via {provider_name}, fallback={used_fallback}")
 
-            reply = re.sub(r'\([^)]*\)', '', reply)
-            reply = re.sub(r'（[^）]*）', '', reply)
-            reply = reply.strip()
-
-            if not reply:
-                reply = "嗯……"
-
-            # 如果使用了备用线路，先把前缀拼好再统一截断
-            if used_fallback:
-                reply = f"（备用线路）{reply}"
-
-            reply = smart_truncate(reply, max_chars=37)
+            reply = self._prepare_reply_text(reply, used_fallback)
 
             config.CONVERSATION_HISTORY.append({
                 "time": config.get_timestamp(),
@@ -797,16 +971,32 @@ class RemyDesktopPet(QWidget):
             })
             config.save_conversation()
 
-            self.show_typed_message(reply, is_user=False)
+            self._pending_reply = reply
+            if reasoning:
+                if reasoning_streamed:
+                    self._deliver_pending_reply()
+                else:
+                    self.thinking.show_preview(
+                        reasoning,
+                        on_finished=self._deliver_pending_reply,
+                        hold_ms=PREVIEW_MS,
+                    )
+            else:
+                self.thinking.hide()
+                self._deliver_pending_reply()
         except Exception as e:
             print(f"[Remy Debug] Parse exception: {type(e).__name__}: {e}")
+            self.thinking.hide()
+            self._pending_reply = ""
             self.show_typed_message(f"⚠️ 解析失败: {str(e)[:30]}", is_user=False)
         finally:
             self.input_box.setEnabled(True)
 
     @pyqtSlot(str)
-    def _on_api_error(self, error_msg):
+    def _on_api_error(self, error_msg: str) -> None:
         print(f"[Remy Debug] Network error: {error_msg}")
+        self.thinking.hide()
+        self._pending_reply = ""
         self.show_typed_message(f"⚠️ 网络错误: {error_msg[:30]}", is_user=False)
         self.input_box.setEnabled(True)
 
@@ -864,8 +1054,11 @@ class RemyDesktopPet(QWidget):
                     else:
                         msg = f"📋 复制了 {len(current)} 字文本"
                     QTimer.singleShot(0, lambda: self.show_typed_message(msg, is_user=False))
-        except:
-            pass
+        except Exception as error:
+            print(
+                f"[Remy Debug] Clipboard check failed: "
+                f"{type(error).__name__}: {error}"
+            )
 
     def show_context_menu(self, pos):
         menu = QMenu()
@@ -971,14 +1164,14 @@ class RemyDesktopPet(QWidget):
         try:
             subprocess.Popen(path, shell=True)
             self.show_typed_message(f"🚀 蕾咪正在启动 {name}...", is_user=False)
-        except Exception as e:
+        except Exception:
             self.show_typed_message("⚠️ 蕾咪启动失败", is_user=False)
 
     def open_bookmark(self, url):
         try:
             webbrowser.open(url)
             self.show_typed_message("🌐 蕾咪正在打开...", is_user=False)
-        except Exception as e:
+        except Exception:
             self.show_typed_message("⚠️ 蕾咪打开失败", is_user=False)
 
     def closeEvent(self, event):
