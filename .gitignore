@@ -3,6 +3,7 @@
 config.json
 chat_log.txt
 notes.txt
+stats.json
 
 # Python
 __pycache__/

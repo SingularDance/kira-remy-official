@@ -214,3 +214,51 @@ def load_conversation():
                     })
                 except:
                     continue
+
+
+# ============================================================
+# 【统计数据】- 神秘小数字等功能的持久化计数
+# ============================================================
+STATS = {}
+
+
+def default_stats():
+    return {
+        "angry_count": 0,        # 红色：触发愤怒次数
+        "launch_count": 0,       # 蓝色：启动次数
+        "last_2048_score": 0,    # 橙色：最近一次2048得分
+        "like_count": 0,         # 粉色：回复中"喜欢你"出现次数
+    }
+
+
+def load_stats():
+    global STATS
+    stats_path = "stats.json"
+    if os.path.exists(stats_path):
+        try:
+            with open(stats_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                for k, v in default_stats().items():
+                    data.setdefault(k, v)
+                STATS = data
+                return
+        except Exception:
+            pass
+    STATS = default_stats()
+    save_stats()
+
+
+def save_stats():
+    with open("stats.json", "w", encoding="utf-8") as f:
+        json.dump(STATS, f, ensure_ascii=False, indent=2)
+
+
+def increment_stat(key, amount=1):
+    STATS[key] = STATS.get(key, 0) + amount
+    save_stats()
+
+
+def update_stat(key, value):
+    STATS[key] = value
+    save_stats()

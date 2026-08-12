@@ -35,7 +35,8 @@ import config
 from utils import resource_path, smart_truncate, detect_emotion
 from dialogs import (
     HistoryDialog, HelpDialog, SettingsDialog, MasterProfileDialog,
-    NoteDialog, RPSDialog, Game2048Dialog, DiceDialog, APISettingsDialog
+    NoteDialog, RPSDialog, Game2048Dialog, DiceDialog, APISettingsDialog,
+    MysteryNumberManager
 )
 
 
@@ -54,6 +55,8 @@ class RemyDesktopPet(QWidget):
         config.load_shortcuts()
         config.load_notes()
         config.load_conversation()
+        config.load_stats()
+        config.increment_stat("launch_count")
 
         # 首次启动：检查 API 配置
         api_cfg = config.CONFIG.get("api", {})
@@ -94,6 +97,7 @@ class RemyDesktopPet(QWidget):
 
         self.init_ui()
         self.init_tray()
+        self.mystery_number = MysteryNumberManager(self)
 
         QTimer.singleShot(500, self.show_welcome)
         self.setMinimumSize(200, 250)
@@ -287,6 +291,7 @@ class RemyDesktopPet(QWidget):
     def quit_app(self):
         """完全退出程序"""
         config.save_conversation()
+        config.save_stats()
         self.tray_icon.hide()
         QApplication.quit()
 
@@ -295,6 +300,10 @@ class RemyDesktopPet(QWidget):
         # 如果正在睡眠状态，强制使用睡眠头像
         if self.is_sleeping:
             image_path = "Remy_Sleep.png"
+
+        # 统计愤怒触发次数（所有显示 Remy_Angry.png 的路径都经过这里）
+        if image_path == "Remy_Angry.png":
+            config.increment_stat("angry_count")
 
         full_path = resource_path(image_path)
         if os.path.exists(full_path):
@@ -790,6 +799,11 @@ class RemyDesktopPet(QWidget):
 
             reply = smart_truncate(reply, max_chars=37)
 
+            # 统计"喜欢你"出现次数（精确匹配这三个字）
+            like_hits = reply.count("喜欢你")
+            if like_hits:
+                config.increment_stat("like_count", like_hits)
+
             config.CONVERSATION_HISTORY.append({
                 "time": config.get_timestamp(),
                 "role": "Remy",
@@ -902,6 +916,7 @@ class RemyDesktopPet(QWidget):
         menu.addAction("👤 调查员档案").triggered.connect(self.open_master_profile)
         menu.addSeparator()
         menu.addAction("📝 记一笔").triggered.connect(self.open_note)
+        menu.addAction("🍀 显示神秘小数字").triggered.connect(self.show_mystery_number)
 
         game_menu = menu.addMenu("🎮 小游戏")
         game_menu.addAction("🔢 2048").triggered.connect(self.open_2048)
@@ -948,6 +963,8 @@ class RemyDesktopPet(QWidget):
     def open_2048(self):
         dialog = Game2048Dialog(self)
         dialog.exec_()
+        if getattr(dialog, "score", 0) > 0:
+            config.update_stat("last_2048_score", dialog.score)
 
     def _show_api_setup(self):
         """首次启动弹出 API 设置"""
@@ -966,6 +983,10 @@ class RemyDesktopPet(QWidget):
     def open_dice(self):
         dialog = DiceDialog(self)
         dialog.exec_()
+
+    def show_mystery_number(self):
+        """右键菜单 → 显示神秘小数字"""
+        self.mystery_number.show_number()
 
     def launch_app(self, name, path):
         try:
