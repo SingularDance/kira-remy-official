@@ -7,14 +7,15 @@ Remy 桌宠 - 壁纸选择器弹窗
 
 import os
 import random
+import webbrowser
 import winreg
 
 from PyQt5.QtWidgets import (
     QDialog, QLabel, QVBoxLayout, QHBoxLayout,
     QPushButton, QScrollArea, QWidget, QGridLayout,
-    QFileDialog
+    QFileDialog, QMenu
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPixmap, QIcon
 
 import config
@@ -53,7 +54,8 @@ class WallpaperPickerDialog(QDialog):
         self._thumb_buttons = []       # (path, QPushButton)
         self._current_wallpaper = self._read_current_wallpaper()
         self.init_ui()
-        self._load_thumbnails()
+        # 延迟加载缩略图，让弹窗先渲染出来
+        QTimer.singleShot(30, self._load_thumbnails)
 
     # ============================================================
     #  UI 构建
@@ -79,6 +81,12 @@ class WallpaperPickerDialog(QDialog):
         self._folder_label.setWordWrap(True)
         layout.addWidget(self._folder_label)
 
+        # 感谢语
+        thanks = QLabel("感谢各位调查员对星夜颂歌的支持！")
+        thanks.setStyleSheet("font-size: 11px; color: #999999;")
+        thanks.setAlignment(Qt.AlignCenter)
+        layout.addWidget(thanks)
+
         # 顶部按钮行
         btn_row = QHBoxLayout()
         btn_row.setSpacing(12)
@@ -92,6 +100,36 @@ class WallpaperPickerDialog(QDialog):
         random_btn.clicked.connect(self._on_random)
         random_btn.setStyleSheet(self._btn_style("#DAAD69"))
         btn_row.addWidget(random_btn)
+
+        # 社区二创下拉按钮
+        community_btn = QPushButton("🎨 社区二创")
+        community_btn.setStyleSheet(self._btn_style("#6C5CE7"))
+        community_menu = QMenu(self)
+        community_menu.setStyleSheet("""
+            QMenu {
+                background-color: #ffffff;
+                color: #333333;
+                border: 1px solid #333333;
+                border-radius: 6px;
+                padding: 4px;
+                font-family: Microsoft YaHei;
+            }
+            QMenu::item {
+                padding: 8px 20px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #333333;
+                color: white;
+            }
+        """)
+        community_menu.addAction("🖼️ 社区二创图片/壁纸v1").triggered.connect(
+            lambda: webbrowser.open("https://b23.tv/ZK2hiLz"))
+        community_menu.addAction("🖼️ 社区二创图片/壁纸v2").triggered.connect(
+            lambda: webbrowser.open("https://b23.tv/L1nUtAt"))
+        community_btn.clicked.connect(lambda: community_menu.exec_(
+            community_btn.mapToGlobal(community_btn.rect().bottomLeft())))
+        btn_row.addWidget(community_btn)
 
         btn_row.addStretch()
 
@@ -110,6 +148,13 @@ class WallpaperPickerDialog(QDialog):
         self._grid = QGridLayout(self._grid_widget)
         self._grid.setSpacing(10)
         self._grid.setContentsMargins(4, 4, 4, 4)
+
+        # 加载中占位提示
+        self._loading_label = QLabel("当前图片较多，蕾咪正在全速加载中！！")
+        self._loading_label.setStyleSheet("font-size: 16px; color: #DAAD69; padding: 60px;")
+        self._loading_label.setAlignment(Qt.AlignCenter)
+        self._grid.addWidget(self._loading_label, 0, 0, 1, self.COLS)
+
         self._scroll.setWidget(self._grid_widget)
         layout.addWidget(self._scroll, 1)
 

@@ -1187,9 +1187,8 @@ class RemyDesktopPet(QWidget):
         self.mystery_number.show_number()
 
     def play_wallpaper_emotion(self):
-        """切换壁纸时按随机队列顺序播放表情 + 硬编码台词。"""
-        if self.is_speaking or self.is_typing or self.is_processing_message:
-            return
+        """切换壁纸时按随机队列顺序播放表情 + 硬编码台词（强行打断当前对话）。"""
+        self._interrupt_dialogue()
 
         # 队列为空或已播完一轮 → 重新随机排列
         if not self.wallpaper_queue or self.wallpaper_queue_index >= len(self.wallpaper_queue):
