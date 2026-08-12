@@ -61,6 +61,7 @@ from thinking import (
     ThinkingController,
     apply_thinking_request,
     extract_reasoning,
+    normalize_reasoning,
     supports_thinking,
 )
 from utils import resource_path, smart_truncate, detect_emotion
@@ -252,8 +253,10 @@ class RemyDesktopPet(QWidget):
             self._enter_thinking_pose()
         self.thinking.update_streaming_preview(text)
 
-    @pyqtSlot()
-    def hide_thinking_bubble(self) -> None:
+    @pyqtSlot(int)
+    def hide_thinking_bubble(self, request_id: int) -> None:
+        if request_id != self._request_seq:
+            return
         self.thinking.hide()
 
     def _enter_thinking_pose(self) -> None:
@@ -907,6 +910,7 @@ class RemyDesktopPet(QWidget):
                         self,
                         "hide_thinking_bubble",
                         Qt.QueuedConnection,
+                        Q_ARG(int, request_id),
                     )
 
                 print(f"[Remy Debug] [{label}] Calling API: {url}")
@@ -1076,6 +1080,7 @@ class RemyDesktopPet(QWidget):
             print(f"[Remy Debug] API success via {provider_name}, fallback={used_fallback}")
 
             reply = self._prepare_reply_text(reply, used_fallback)
+            reasoning = normalize_reasoning(reasoning)
 
             config.CONVERSATION_HISTORY.append({
                 "time": config.get_timestamp(),

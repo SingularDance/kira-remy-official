@@ -24,11 +24,12 @@ from PyQt5.QtGui import (
     QRegion,
     QTextDocument,
 )
-from PyQt5.QtWidgets import QLabel, QWidget
+from PyQt5.QtWidgets import QLabel, QTextEdit, QWidget
 
 COMPLETION_MAX_TOKENS = 2048
 NON_THINKING_MAX_TOKENS = 128
 GENERIC_THOUGHT = "大脑在快速思考中..."
+PLACEHOLDER_REASONING = frozenset({"...", "……", "嗯...", "嗯……"})
 MIN_THINKING_DURATION_MS = 800
 MAX_THINKING_DURATION_MS = 20000
 MIN_TYPE_INTERVAL_MS = 40
@@ -47,7 +48,6 @@ TEXT_GAP = 2
 TAIL_HEIGHT = 28
 HORIZONTAL_GAP = 6
 VERTICAL_GAP = 4
-# Remy_Sleep.png 头附近锚点（相对 200x200 立绘框比例）
 HEAD_X_RATIO = 0.58
 HEAD_Y_RATIO = 0.28
 WIDTH_SEARCH_STEP = 8
@@ -59,7 +59,6 @@ def thinking_header_text(seconds: int) -> str:
 
 
 def hold_duration_ms(text: str) -> int:
-    """展示停留：基础 3 秒 + 字数 × 0.05 秒，上限 20 秒。"""
     return min(
         HOLD_MAX_MS,
         HOLD_BASE_MS + len(text or "") * HOLD_MS_PER_CHAR,
@@ -97,7 +96,12 @@ def extract_reasoning(message: object) -> str:
     value = message.get("reasoning_content")
     if not isinstance(value, str):
         return ""
-    return value.strip()
+    return normalize_reasoning(value)
+
+
+def normalize_reasoning(text: str) -> str:
+    cleaned = (text or "").strip()
+    return "" if cleaned in PLACEHOLDER_REASONING else cleaned
 
 
 def preview_text(text: str) -> str:
@@ -144,23 +148,40 @@ class ThinkingCloudBubble(QWidget):
             }
         """)
 
-        self._body = QLabel("……", self)
+        self._body = QTextEdit(self)
         body_font = QFont("Microsoft YaHei", 9)
         self._body.setFont(body_font)
-        self._body.setWordWrap(True)
+        self._body.setReadOnly(True)
+        self._body.setAcceptRichText(False)
+        self._body.setLineWrapMode(QTextEdit.WidgetWidth)
+        self._body.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._body.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._body.document().setDocumentMargin(0)
         self._body.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        self._body.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._body.setCursor(Qt.PointingHandCursor)
+        self._body.mousePressEvent = self._body_mouse_press
         self._body.setStyleSheet("""
-            QLabel {
+            QTextEdit {
                 color: #71808a;
                 background-color: transparent;
                 border: none;
+                padding: 0;
             }
         """)
         self.hide()
 
     def set_click_handler(self, handler: Callable[[], None] | None) -> None:
         self._on_clicked = handler
+
+    def _body_mouse_press(self, event: QMouseEvent) -> None:
+        if (
+            event.button() == Qt.LeftButton
+            and self._on_clicked is not None
+        ):
+            self._on_clicked()
+            event.accept()
+            return
+        event.ignore()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if (
@@ -231,7 +252,8 @@ class ThinkingCloudBubble(QWidget):
         """在固定画布内更新内容区，不改窗口大小（画布不够时由 ensure_canvas）。"""
         text_width = self._resolve_text_width(text_width)
         content_h = self.measure_height(text_width)
-        body_height = self._text_height(self._text, text_width)
+        if self._canvas_ready:
+            content_h = min(content_h, self.height())
         content_w = text_width + HORIZONTAL_PADDING * 2
         self.ensure_canvas(content_w, content_h)
         self._tail_on_right = tail_on_right
@@ -244,8 +266,7 @@ class ThinkingCloudBubble(QWidget):
         self._content_rect = QRect(left, top, content_w, content_h)
 
         self._body.setFixedWidth(text_width)
-        self._body.setFixedHeight(body_height)
-        self._body.setText(self._text)
+        self._body.setPlainText(self._text)
         self._relayout_labels()
 
         # 仅内容区可点，空白画布点击穿透观感更好
