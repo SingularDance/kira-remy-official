@@ -10,7 +10,7 @@ import webbrowser
 from PyQt5.QtWidgets import (
     QDialog, QLabel, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QListWidget, QListWidgetItem,
-    QWidget, QMessageBox, QFormLayout
+    QWidget, QMessageBox, QFormLayout, QCheckBox
 )
 from PyQt5.QtCore import Qt
 
@@ -21,7 +21,7 @@ class APISettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("🔑 API 设置")
-        self.setGeometry(200, 200, 550, 480)
+        self.setGeometry(200, 200, 550, 540)
         self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: Microsoft YaHei;")
         self.init_ui()
         self.load_current_config()
@@ -118,6 +118,23 @@ class APISettingsDialog(QDialog):
         show_btn.clicked.connect(lambda: self.toggle_key_visibility(self.primary_key_input, show_btn))
         key_layout.addWidget(show_btn)
         pg_form.addRow("API Key:", key_layout)
+
+        self.thinking_enabled = QCheckBox("启用思考模式（仅支持的模型生效）")
+        self.thinking_enabled.setStyleSheet("""
+            QCheckBox {
+                color: #555555;
+                font-size: 13px;
+                spacing: 6px;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+            }
+        """)
+        self.primary_provider.currentRowChanged.connect(
+            self._update_thinking_option
+        )
+        pg_form.addRow("思考模式:", self.thinking_enabled)
 
         primary_help_btn = QPushButton("📖 如何获取 API Key？")
         primary_help_btn.setStyleSheet("""
@@ -279,6 +296,23 @@ class APISettingsDialog(QDialog):
             if idx >= 0:
                 self.backup_provider.setCurrentRow(idx)
             self.backup_key_input.setText(api_cfg.get("backup_key", ""))
+        self.thinking_enabled.setChecked(
+            api_cfg.get("thinking_enabled") is True
+        )
+        self._update_thinking_option()
+
+    def _update_thinking_option(self) -> None:
+        item = self.primary_provider.currentItem()
+        provider_id = item.data(Qt.UserRole) if item else ""
+        provider = config.API_PROVIDERS.get(provider_id, {})
+        supported = bool(provider.get("supports_thinking", False))
+        self.thinking_enabled.setEnabled(supported)
+        if supported:
+            self.thinking_enabled.setToolTip("")
+        else:
+            self.thinking_enabled.setToolTip(
+                "当前模型不支持思考模式，将使用普通回复。"
+            )
 
     def _find_provider_index(self, list_widget, provider_id):
         for i in range(list_widget.count()):
@@ -319,6 +353,7 @@ class APISettingsDialog(QDialog):
             "primary_key": primary_key,
             "backup": backup_id if backup_key else "",
             "backup_key": backup_key,
+            "thinking_enabled": self.thinking_enabled.isChecked(),
         }
 
         config.save_config()

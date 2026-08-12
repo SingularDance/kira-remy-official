@@ -20,15 +20,17 @@ from utils import resource_path
 API_PROVIDERS = {
     "deepseek": {
         "name": "DeepSeek（推荐）",
-        "url": "https://api.deepseek.com/v1/chat/completions",
-        "model": "deepseek-chat",
+        "url": "https://api.deepseek.com/chat/completions",
+        "model": "deepseek-v4-flash",
         "register_url": "https://platform.deepseek.com/api_keys",
+        "supports_thinking": True,
     },
     "qwen": {
         "name": "通义千问",
         "url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
         "model": "qwen-turbo",
         "register_url": "https://bailian.console.aliyun.com/?tab=api#/api-key",
+        "supports_thinking": False,
     },
 }
 # ============================================================
@@ -94,7 +96,8 @@ def default_config():
             "primary": "deepseek",
             "primary_key": "",
             "backup": "qwen",
-            "backup_key": ""
+            "backup_key": "",
+            "thinking_enabled": False,
         }
     }
 
@@ -113,6 +116,8 @@ def sanitize_config(cfg):
         defaults = default_config()["api"]
         for key, value in defaults.items():
             api.setdefault(key, value)
+        if not isinstance(api.get("thinking_enabled"), bool):
+            api["thinking_enabled"] = defaults["thinking_enabled"]
         cfg["api"] = api
     return cfg
 
@@ -223,7 +228,7 @@ def load_conversation():
                         "role": role,
                         "content": content
                     })
-                except:
+                except (IndexError, ValueError):
                     continue
 
 
