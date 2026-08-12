@@ -15,6 +15,7 @@ from dialogs.games.game_2048 import Game2048Dialog
 from dialogs.games.dice import DiceDialog
 from dialogs.api_settings import APISettingsDialog
 from dialogs.mystery_number import MysteryNumberManager
+from dialogs.wallpaper_picker import WallpaperPickerDialog
 
 __all__ = [
     "HistoryDialog",
@@ -27,4 +28,5 @@ __all__ = [
     "DiceDialog",
     "APISettingsDialog",
     "MysteryNumberManager",
+    "WallpaperPickerDialog",
 ]

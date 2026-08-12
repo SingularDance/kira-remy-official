@@ -70,6 +70,15 @@ DRAG_RELEASE_PHRASES = {
     "Remy_Happy.png":   "嘿嘿，飞起来的感觉真好~",
 }
 # ============================================================
+# 【硬编码壁纸切换台词】- 切换壁纸时随机表情 + 队列播放
+# ============================================================
+WALLPAPER_PHRASES = {
+    "Remy_Angry.png":   "喂！刚才那张壁纸蕾咪还没欣赏够呢！调回去调回去！",
+    "Remy_Expect.png":  "哇~这张壁纸超好看的耶！可以私发给蕾咪一份嘛！？",
+    "Remy_Happy.png":   "嘿嘿，这张壁纸蕾咪喜欢！很对蕾咪的品味哟！",
+    "Remy_Open.png":    "哼哼~聪明的蕾咪已经帮你换好壁纸了哦。",
+}
+# ============================================================
 
 
 def default_config():
@@ -80,6 +89,7 @@ def default_config():
         "relationship": "朋友",
         "master_birthday": "2000-01-01",
         "master_gender": "未知",
+        "wallpaper_folder": "",
         "api": {
             "primary": "deepseek",
             "primary_key": "",
@@ -95,6 +105,7 @@ def sanitize_config(cfg):
         return default_config()
     cfg = dict(cfg)
     cfg.pop("_说明", None)
+    cfg.setdefault("wallpaper_folder", "")
     if "api" not in cfg or not isinstance(cfg.get("api"), dict):
         cfg["api"] = default_config()["api"]
     else:

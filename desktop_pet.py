@@ -36,7 +36,7 @@ from utils import resource_path, smart_truncate, detect_emotion
 from dialogs import (
     HistoryDialog, HelpDialog, SettingsDialog, MasterProfileDialog,
     NoteDialog, RPSDialog, Game2048Dialog, DiceDialog, APISettingsDialog,
-    MysteryNumberManager
+    MysteryNumberManager, WallpaperPickerDialog
 )
 
 
@@ -79,6 +79,8 @@ class RemyDesktopPet(QWidget):
         self.last_drag_phrase = None  # 上一次拖拽触发的台词，防止连续重复
         self.emotion_queue = []  # 表情切换随机队列
         self.emotion_queue_index = 0  # 当前队列位置
+        self.wallpaper_queue = []  # 壁纸切换表情随机队列
+        self.wallpaper_queue_index = 0
         self.last_interaction_time = time.time()
         self._process_start_time = 0  # 用于防御性超时检测
         self.fade_timer = QTimer()
@@ -922,6 +924,9 @@ class RemyDesktopPet(QWidget):
         game_menu.addAction("🔢 2048").triggered.connect(self.open_2048)
         game_menu.addAction("✊ 猜拳").triggered.connect(self.open_rps)
         game_menu.addAction("🎲 掷骰子").triggered.connect(self.open_dice)
+
+        menu.addAction("🖼️ 切换壁纸").triggered.connect(self.open_wallpaper_picker)
+
         menu.addSeparator()
         app_menu = menu.addMenu("🚀 管家服务")
         for app in config.SHORTCUTS.get("apps", []):
@@ -987,6 +992,27 @@ class RemyDesktopPet(QWidget):
     def show_mystery_number(self):
         """右键菜单 → 显示神秘小数字"""
         self.mystery_number.show_number()
+
+    def play_wallpaper_emotion(self):
+        """切换壁纸时按随机队列顺序播放表情 + 硬编码台词。"""
+        if self.is_speaking or self.is_typing or self.is_processing_message:
+            return
+
+        # 队列为空或已播完一轮 → 重新随机排列
+        if not self.wallpaper_queue or self.wallpaper_queue_index >= len(self.wallpaper_queue):
+            self.wallpaper_queue = list(config.WALLPAPER_PHRASES.keys())
+            random.shuffle(self.wallpaper_queue)
+            self.wallpaper_queue_index = 0
+
+        chosen = self.wallpaper_queue[self.wallpaper_queue_index]
+        self.wallpaper_queue_index += 1
+        phrase = config.WALLPAPER_PHRASES[chosen]
+        self.show_typed_message(phrase, is_user=False, override_avatar=chosen)
+
+    def open_wallpaper_picker(self):
+        """右键菜单 → 切换壁纸（弹窗预览）"""
+        dialog = WallpaperPickerDialog(self)
+        dialog.exec_()
 
     def launch_app(self, name, path):
         try:
