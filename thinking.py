@@ -106,7 +106,23 @@ def normalize_reasoning(text: str) -> str:
 
 def preview_text(text: str) -> str:
     cleaned = re.sub(r"\s+", " ", (text or "").strip())
-    return cleaned or GENERIC_THOUGHT
+    if not cleaned:
+        return GENERIC_THOUGHT
+    cleaned = cleaned.replace("我们", "蕾咪")
+    cleaned = cleaned.replace("用户", _nickname())
+    return cleaned
+
+
+def _nickname() -> str:
+    """思考内容里对用户（调查员）的称呼，跟随配置昵称。"""
+    try:
+        import config
+        nickname = config.CONFIG.get("nickname")
+        if nickname:
+            return nickname
+    except Exception:
+        pass
+    return "调查员"
 
 
 def type_interval_ms(text_length: int) -> int:
