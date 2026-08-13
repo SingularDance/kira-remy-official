@@ -12,6 +12,32 @@ import re
 import base64
 
 
+# 识图支持的图片扩展名 → MIME 类型映射
+IMAGE_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".webp": "image/webp",
+}
+
+
+def is_image_file(path):
+    """按扩展名判断是否为识图支持的图片文件。"""
+    ext = os.path.splitext(path or "")[1].lower()
+    return ext in IMAGE_MIME
+
+
+def image_to_data_uri(path):
+    """把本地图片读成 base64 data URI，供多模态识图接口使用。"""
+    ext = os.path.splitext(path)[1].lower()
+    mime = IMAGE_MIME.get(ext, "image/png")
+    with open(path, "rb") as f:
+        data = base64.b64encode(f.read()).decode()
+    return f"data:{mime};base64,{data}"
+
+
 def resource_path(relative_path):
     """获取资源绝对路径，兼容 PyInstaller --onefile 打包"""
     try:

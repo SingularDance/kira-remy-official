@@ -63,7 +63,13 @@ from thinking import (
     extract_reasoning,
     supports_thinking,
 )
-from utils import resource_path, smart_truncate, detect_emotion
+from utils import (
+    resource_path,
+    smart_truncate,
+    detect_emotion,
+    is_image_file,
+    image_to_data_uri,
+)
 
 
 class RemyDesktopPet(QWidget):
@@ -136,6 +142,7 @@ class RemyDesktopPet(QWidget):
         self.show_typed_message("系统启动成功！我叫蕾咪~来自5000年后！", is_user=False)
 
     def init_ui(self):
+        self.setAcceptDrops(True)
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -748,8 +755,12 @@ class RemyDesktopPet(QWidget):
 
         threading.Thread(target=self.call_api, args=(user_input,), daemon=True).start()
 
-    def call_api(self, user_input: str) -> None:
-        """调用 AI API，支持主备线路自动故障切换"""
+    def call_api(self, user_input: str, extra_content=None) -> None:
+        """调用 AI API，支持主备线路自动故障切换。
+
+        extra_content：可选。识图等场景需要在不污染历史的前提下，
+        额外追加一条用户消息（通常是「图片内容描述 + 人设指令」）。
+        """
         try:
             messages = [{"role": "system", "content": config.get_system_prompt()}]
             for entry in config.CONVERSATION_HISTORY[-20:]:
@@ -760,6 +771,9 @@ class RemyDesktopPet(QWidget):
                     continue
                 role = "user" if entry["role"] == "调查员" else "assistant"
                 messages.append({"role": role, "content": entry["content"]})
+
+            if extra_content:
+                messages.append({"role": "user", "content": extra_content})
 
             api_cfg = config.CONFIG.get("api", {})
             thinking_enabled = api_cfg.get("thinking_enabled") is True
@@ -943,6 +957,118 @@ class RemyDesktopPet(QWidget):
                 reply_parts.append(reply_piece)
 
         return "".join(reasoning_parts), "".join(reply_parts)
+
+    # ============================================================
+    # 【识图】拖拽图片 → 视觉代理 → DeepSeek 人设回复
+    # ============================================================
+    def dragEnterEvent(self, event):
+        """外部文件拖入：仅接受本地图片"""
+        mime = event.mimeData()
+        if mime.hasUrls():
+            for url in mime.urls():
+                path = url.toLocalFile()
+                if path and is_image_file(path):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dropEvent(self, event):
+        """拖入图片后触发识图"""
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if path and is_image_file(path):
+                self.on_image_dropped(path)
+                return
+
+    def on_image_dropped(self, image_path):
+        """拖入图片入口：镜像 send_message 的守卫/唤醒/气泡/线程流程"""
+        if self.is_speaking or self.is_typing or self.is_processing_message:
+            return
+        if self.is_sleeping:
+            self.wake_up()
+
+        self.input_box.setEnabled(False)
+        self.last_interaction_time = time.time()
+        self._process_start_time = time.time()
+
+        self.show_typed_message("📷 [图片]", is_user=True)
+
+        config.CONVERSATION_HISTORY.append({
+            "time": config.get_timestamp(),
+            "role": "调查员",
+            "content": "[图片]"
+        })
+        config.save_conversation()
+
+        threading.Thread(
+            target=self.call_vision_api, args=(image_path,), daemon=True
+        ).start()
+
+    def call_vision_api(self, image_path):
+        """后台线程：图片 → 视觉描述 → DeepSeek 人设回复"""
+        try:
+            data_uri = image_to_data_uri(image_path)
+            description = self._request_vision_description(data_uri)
+            persona_msg = (
+                f"（调查员给蕾咪看了一张图，内容是：{description}）"
+                "请用蕾咪的傲娇语气，简单说说你看到了什么。"
+            )
+            self.call_api("", extra_content=persona_msg)
+        except Exception as e:
+            print(f"[Remy Debug] Vision error: {type(e).__name__}: {e}")
+            QMetaObject.invokeMethod(
+                self, "_on_api_error",
+                Qt.QueuedConnection,
+                Q_ARG(str, str(e)),
+            )
+
+    def _request_vision_description(self, data_uri):
+        """调用视觉供应商，把图片转成客观文字描述"""
+        api_cfg = config.CONFIG.get("api", {})
+        provider_id = api_cfg.get("vision_provider", "")
+        api_key = api_cfg.get("vision_key", "")
+        provider = config.API_PROVIDERS.get(provider_id)
+        if not provider or not api_key:
+            raise Exception("未配置识图 Key，请在「API 设置」中填写视觉模型的密钥")
+
+        messages = [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "请客观、详细地用中文描述这张图片的内容（主要物体、场景、文字等），不要加入主观评价。",
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_uri},
+                },
+            ],
+        }]
+        data = {
+            "model": provider["model"],
+            "messages": messages,
+            "max_tokens": 1024,
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        print(f"[Remy Debug] [识图] Calling vision API: {provider['url']}")
+        response = requests.post(
+            provider["url"],
+            headers=headers,
+            json=data,
+            timeout=60,
+        )
+        print(f"[Remy Debug] [识图] Vision API status: {response.status_code}")
+        if response.status_code != 200:
+            raise Exception(f"识图接口返回 {response.status_code}")
+        result = json.loads(response.text)
+        content = result["choices"][0]["message"].get("content") or ""
+        if not content.strip():
+            raise Exception("识图接口未返回描述")
+        return content.strip()
 
     def _prepare_reply_text(self, reply: str, used_fallback: bool) -> str:
         reply = re.sub(r'\([^)]*\)', '', reply or "")

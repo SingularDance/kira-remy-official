@@ -32,6 +32,14 @@ API_PROVIDERS = {
         "register_url": "https://bailian.console.aliyun.com/?tab=api#/api-key",
         "supports_thinking": False,
     },
+    "glm4v": {
+        "name": "智谱 GLM-4V-Flash（识图）",
+        "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        "model": "glm-4v-flash",
+        "register_url": "https://open.bigmodel.cn/",
+        "supports_thinking": False,
+        "supports_vision": True,
+    },
 }
 # ============================================================
 
@@ -98,6 +106,8 @@ def default_config():
             "backup": "qwen",
             "backup_key": "",
             "thinking_enabled": False,
+            "vision_provider": "glm4v",
+            "vision_key": "",
         }
     }
 

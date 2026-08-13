@@ -21,7 +21,7 @@ class APISettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("🔑 API 设置")
-        self.setGeometry(200, 200, 550, 540)
+        self.setGeometry(200, 200, 550, 760)
         self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: Microsoft YaHei;")
         self.init_ui()
         self.load_current_config()
@@ -246,6 +246,100 @@ class APISettingsDialog(QDialog):
         bg_layout.addLayout(bg_form)
         layout.addWidget(backup_group)
 
+        # === 视觉代理（识图） ===
+        vision_group = QWidget()
+        vision_group.setStyleSheet("""
+            QWidget {
+                background-color: #f5f7fa;
+                border: 1px solid #8fb8d8;
+                border-radius: 10px;
+            }
+        """)
+        vg_layout = QVBoxLayout(vision_group)
+        vg_layout.setSpacing(8)
+
+        vg_title = QLabel("🖼️ 视觉代理（识图 · 拖图片到蕾咪身上）")
+        vg_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #4a6a8a; border: none;")
+        vg_layout.addWidget(vg_title)
+
+        vg_form = QFormLayout()
+        vg_form.setSpacing(8)
+
+        self.vision_provider = QListWidget()
+        self.vision_provider.setFixedHeight(60)
+        self.vision_provider.setStyleSheet("""
+            QListWidget {
+                background-color: #ffffff;
+                border: 1px solid #cccccc;
+                border-radius: 6px;
+                padding: 3px;
+                font-size: 13px;
+            }
+            QListWidget::item { padding: 4px 8px; }
+            QListWidget::item:selected {
+                background-color: #8fb8d8;
+                color: #1a1a1a;
+            }
+        """)
+        for key, info in config.API_PROVIDERS.items():
+            if not info.get("supports_vision"):
+                continue
+            item = QListWidgetItem(f"{info['name']} — 模型: {info['model']}")
+            item.setData(Qt.UserRole, key)
+            self.vision_provider.addItem(item)
+        self.vision_provider.setCurrentRow(0)
+        vg_form.addRow("识图供应商:", self.vision_provider)
+
+        vk_layout = QHBoxLayout()
+        self.vision_key_input = QLineEdit()
+        self.vision_key_input.setPlaceholderText("粘贴视觉模型的 API Key（可选）...")
+        self.vision_key_input.setEchoMode(QLineEdit.Password)
+        self.vision_key_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #ffffff;
+                border: 1px solid #cccccc;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 13px;
+                color: #333333;
+            }
+            QLineEdit:focus { border: 1px solid #8fb8d8; }
+        """)
+        vk_layout.addWidget(self.vision_key_input)
+
+        show_btn3 = QPushButton("👁")
+        show_btn3.setFixedWidth(35)
+        show_btn3.setStyleSheet("""
+            QPushButton {
+                background-color: #eeeeee;
+                border: 1px solid #cccccc;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QPushButton:hover { background-color: #dddddd; }
+        """)
+        show_btn3.clicked.connect(lambda: self.toggle_key_visibility(self.vision_key_input, show_btn3))
+        vk_layout.addWidget(show_btn3)
+        vg_form.addRow("视觉 Key:", vk_layout)
+
+        vision_help_btn = QPushButton("📖 如何获取识图 Key？（智谱 GLM-4V-Flash 免费）")
+        vision_help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #4a6a8a;
+                border: none;
+                padding: 3px;
+                font-size: 12px;
+                text-decoration: underline;
+            }
+            QPushButton:hover { color: #6a8aa8; }
+        """)
+        vision_help_btn.clicked.connect(lambda: self.open_register_url(self.vision_provider))
+        vg_form.addRow("", vision_help_btn)
+
+        vg_layout.addLayout(vg_form)
+        layout.addWidget(vision_group)
+
         # 按钮
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(15)
@@ -296,6 +390,11 @@ class APISettingsDialog(QDialog):
             if idx >= 0:
                 self.backup_provider.setCurrentRow(idx)
             self.backup_key_input.setText(api_cfg.get("backup_key", ""))
+        if api_cfg.get("vision_provider"):
+            idx = self._find_provider_index(self.vision_provider, api_cfg["vision_provider"])
+            if idx >= 0:
+                self.vision_provider.setCurrentRow(idx)
+            self.vision_key_input.setText(api_cfg.get("vision_key", ""))
         self.thinking_enabled.setChecked(
             api_cfg.get("thinking_enabled") is True
         )
@@ -339,10 +438,13 @@ class APISettingsDialog(QDialog):
     def save_and_accept(self):
         primary_item = self.primary_provider.currentItem()
         backup_item = self.backup_provider.currentItem()
+        vision_item = self.vision_provider.currentItem()
         primary_id = primary_item.data(Qt.UserRole) if primary_item else ""
         backup_id = backup_item.data(Qt.UserRole) if backup_item else ""
+        vision_id = vision_item.data(Qt.UserRole) if vision_item else ""
         primary_key = self.primary_key_input.text().strip()
         backup_key = self.backup_key_input.text().strip()
+        vision_key = self.vision_key_input.text().strip()
 
         if not primary_key:
             QMessageBox.warning(self, "提示", "⚠️ 请至少填写主线路的 API Key！\n\n如果暂时不想配置，请点「跳过」。")
@@ -354,6 +456,8 @@ class APISettingsDialog(QDialog):
             "backup": backup_id if backup_key else "",
             "backup_key": backup_key,
             "thinking_enabled": self.thinking_enabled.isChecked(),
+            "vision_provider": vision_id,
+            "vision_key": vision_key,
         }
 
         config.save_config()

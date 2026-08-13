@@ -5,7 +5,8 @@
     "3. primary / backup 可选：deepseek 或 qwen",
     "4. config.json 含密钥，已被 .gitignore 忽略，请勿提交到 Git",
     "5. 也可以启动后在弹窗里填写；保存后同样写入 config.json",
-    "6. thinking_enabled 可控制思考模式，仅对支持的模型生效"
+    "6. thinking_enabled 可控制思考模式，仅对支持的模型生效",
+    "7. 识图（拖图片到蕾咪身上）：需在 vision_key 填智谱 GLM-4V-Flash 的免费 Key"
   ],
   "nickname": "调查员",
   "call_me": "你",
@@ -17,6 +18,8 @@
     "primary_key": "",
     "backup": "qwen",
     "backup_key": "",
-    "thinking_enabled": false
+    "thinking_enabled": false,
+    "vision_provider": "glm4v",
+    "vision_key": ""
   }
 }
