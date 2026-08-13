@@ -20,8 +20,8 @@ import config
 class APISettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("🔑 API 设置")
-        self.setGeometry(200, 200, 550, 760)
+        self.setWindowTitle("🔑 API 配置")
+        self.setGeometry(200, 100, 550, 760)
         self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: Microsoft YaHei;")
         self.init_ui()
         self.load_current_config()

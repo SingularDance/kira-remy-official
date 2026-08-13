@@ -100,6 +100,9 @@ class HistoryDialog(QDialog):
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, widget)
 
+        # 打开/刷新后直接定位到最新一条记录（列表末尾）
+        self.list_widget.scrollToBottom()
+
     def delete_entry(self, index):
         if 0 <= index < len(config.CONVERSATION_HISTORY):
             del config.CONVERSATION_HISTORY[index]

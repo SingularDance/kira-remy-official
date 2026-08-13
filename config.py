@@ -171,8 +171,7 @@ def load_shortcuts():
             ],
             "bookmarks": [
                 {"name": "星夜颂歌AI", "url": "https://space.bilibili.com/3546836283427171"},
-                {"name": "B站", "url": "https://www.bilibili.com"},
-                {"name": "AI游戏卷出了一位冠军选手", "url": "https://mp.weixin.qq.com/s/z14oLkn4jAsA0jvKSus4WA"}
+                {"name": "B站", "url": "https://www.bilibili.com"}
             ]
         }
         with open(shortcuts_path, "w", encoding="utf-8") as f:
@@ -196,16 +195,22 @@ def save_note(text):
 
 def get_system_prompt():
     base = SYSTEM_PROMPT
+    relationship = CONFIG.get('relationship', '朋友')
+
+    tone = ""
+    if any(k in relationship for k in ("恋人", "女友", "男友", "情侣", "老婆", "老公", "女朋友", "男朋友")):
+        tone = "你和调查员是恋人关系。保持傲娇的个性，但在恋人面前会更温柔、更黏人、会撒娇，语气里透着喜欢和在乎。\n"
+
     master_info = f"""
 【调查员档案】
 - 昵称：{CONFIG.get('nickname', '调查员')}
 - 对我的称呼：{CONFIG.get('call_me', '你')}
-- 我们之间的关系：{CONFIG.get('relationship', '朋友')}
+- 我们之间的关系：{relationship}
 - 调查员性别：{CONFIG.get('master_gender', '未知')}
 
 请根据以上档案信息，以合适的称呼和语气与我对话。
 """
-    return base + master_info
+    return base + tone + master_info
 
 def get_timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")

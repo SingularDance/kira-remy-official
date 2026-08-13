@@ -56,7 +56,7 @@ import config
 from dialogs import (
     HistoryDialog, HelpDialog, SettingsDialog, MasterProfileDialog,
     NoteDialog, RPSDialog, Game2048Dialog, DiceDialog, APISettingsDialog,
-    MysteryNumberManager, WallpaperPickerDialog
+    APISetupWizard, MysteryNumberManager, WallpaperPickerDialog
 )
 from thinking import (
     ThinkingController,
@@ -1138,7 +1138,7 @@ class RemyDesktopPet(QWidget):
                 return
             persona_msg = (
                 f"（调查员给蕾咪看了一张图，内容是：{description}）"
-                "请用蕾咪的傲娇语气，简单说说你看到了什么。"
+                "请用蕾咪的语气，简单说说你看到了什么。"
             )
             self.call_api("", request_id, extra_content=persona_msg)
         except Exception as e:
@@ -1439,8 +1439,8 @@ class RemyDesktopPet(QWidget):
             config.update_stat("last_2048_score", dialog.score)
 
     def _show_api_setup(self):
-        """首次启动弹出 API 设置"""
-        dialog = APISettingsDialog(self)
+        """首次启动弹出 API 配置向导"""
+        dialog = APISetupWizard(self)
         dialog.exec_()
 
     def open_api_settings(self):
