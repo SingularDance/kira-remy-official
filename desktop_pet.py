@@ -42,10 +42,12 @@ from PyQt5.QtGui import (
     QColor,
     QFont,
     QIcon,
+    QMoveEvent,
     QPainter,
     QPen,
     QPixmap,
     QResizeEvent,
+    QShowEvent,
 )
 import pyperclip
 import requests
@@ -57,10 +59,10 @@ from dialogs import (
     MysteryNumberManager, WallpaperPickerDialog
 )
 from thinking import (
-    PREVIEW_MS,
     ThinkingController,
     apply_thinking_request,
     extract_reasoning,
+    normalize_reasoning,
     supports_thinking,
 )
 from utils import (
@@ -70,6 +72,9 @@ from utils import (
     is_image_file,
     image_to_data_uri,
 )
+
+# 超过该像素位移才算拖拽，避免单击微抖误触发打断
+DRAG_THRESHOLD_PX = 8
 
 
 class RemyDesktopPet(QWidget):
@@ -107,6 +112,7 @@ class RemyDesktopPet(QWidget):
 
         self.drag_pos = None
         self.drag_moved = False  # 追踪是否拖拽了头像
+        self._press_global_pos = None
         self.is_drag_releasing = False  # 拖拽后正在播放台词，禁止新的拖拽
         self.last_drag_phrase = None  # 上一次拖拽触发的台词，防止连续重复
         self.emotion_queue = []  # 表情切换随机队列
@@ -116,6 +122,11 @@ class RemyDesktopPet(QWidget):
         self.last_interaction_time = time.time()
         self._process_start_time = 0  # 用于防御性超时检测
         self._pending_reply = ""
+        self._fade_hides_thinking = False
+        self._api_in_flight = False
+        self._request_seq = 0
+        self._current_avatar = "Remy_Shut.png"
+        self._screen_change_bound = False
         self.thinking = ThinkingController(self)
         self.fade_timer = QTimer()
         self.type_timer = QTimer()
@@ -240,21 +251,39 @@ class RemyDesktopPet(QWidget):
         self.customContextMenuRequested.connect(self.show_context_menu)
         self.setWindowOpacity(0.95)
 
-    @pyqtSlot(str)
-    def show_thinking_bubble(self, text: str) -> None:
+    @pyqtSlot(str, int)
+    def show_thinking_bubble(self, text: str, request_id: int) -> None:
+        if request_id != self._request_seq:
+            return
+        self._enter_thinking_pose()
         self.thinking.show_preview(text)
 
-    @pyqtSlot(str)
-    def update_thinking_bubble(self, text: str) -> None:
+    @pyqtSlot(str, int)
+    def update_thinking_bubble(self, text: str, request_id: int) -> None:
+        if request_id != self._request_seq:
+            return
+        if not self.thinking.is_visible():
+            self._enter_thinking_pose()
         self.thinking.update_streaming_preview(text)
 
-    @pyqtSlot()
-    def hide_thinking_bubble(self) -> None:
+    @pyqtSlot(int)
+    def hide_thinking_bubble(self, request_id: int) -> None:
+        if request_id != self._request_seq:
+            return
         self.thinking.hide()
+
+    def _enter_thinking_pose(self) -> None:
+        """思考中使用 Sleep 立绘（不进入真实睡眠状态）"""
+        if not self.is_sleeping:
+            self.set_avatar("Remy_Sleep.png")
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self.thinking.on_resize()
+
+    def moveEvent(self, event: QMoveEvent) -> None:
+        super().moveEvent(event)
+        self.thinking.on_move()
 
     def init_tray(self):
         """初始化系统托盘图标和菜单"""
@@ -337,6 +366,7 @@ class RemyDesktopPet(QWidget):
     def toggle_visibility(self):
         """切换窗口显示/隐藏"""
         if self.isVisible():
+            self.thinking.hide()
             self.hide()
         else:
             self.show()
@@ -345,6 +375,7 @@ class RemyDesktopPet(QWidget):
 
     def quit_app(self):
         """完全退出程序"""
+        self.thinking.hide()
         config.save_conversation()
         config.save_stats()
         self.tray_icon.hide()
@@ -355,6 +386,7 @@ class RemyDesktopPet(QWidget):
         # 如果正在睡眠状态，强制使用睡眠头像
         if self.is_sleeping:
             image_path = "Remy_Sleep.png"
+        self._current_avatar = image_path
 
         # 统计愤怒触发次数（所有显示 Remy_Angry.png 的路径都经过这里）
         if image_path == "Remy_Angry.png":
@@ -408,6 +440,7 @@ class RemyDesktopPet(QWidget):
     def mouse_press_event(self, event):
         if event.button() == Qt.LeftButton:
             self.drag_moved = False  # 重置拖拽标记
+            self._press_global_pos = event.globalPos()
             # 点击头像时唤醒（如果处于睡眠状态）
             if self.is_sleeping:
                 self.wake_up()
@@ -417,28 +450,72 @@ class RemyDesktopPet(QWidget):
     def mouse_release_event(self, event):
         """鼠标释放：区分点击和拖拽"""
         if event.button() == Qt.LeftButton:
+            dragged = self.drag_moved
             if self.drag_moved:
-                # 拖拽后松开 → 随机切换成三种表情之一并说硬编码台词
                 self.drag_release_emotion()
             else:
-                # 没有拖拽 → 是点击 → 随机切换表情
                 self.random_emotion_click()
             self.drag_pos = None
+            self._press_global_pos = None
+            if dragged:
+                # 跨屏拖动后修正 DPI/几何导致的错位
+                QTimer.singleShot(0, self._restore_window_metrics)
+                QTimer.singleShot(50, self._restore_window_metrics)
             event.accept()
 
     def mouse_move_event(self, event):
         if event.buttons() == Qt.LeftButton and self.drag_pos is not None:
             if not self.drag_moved:
-                # 刚开始拖拽 → 最高优先级：打断一切，立即切换 Dangle
+                # 单击时的微抖不视为拖拽，避免误打断思考
+                if self._press_global_pos is not None:
+                    delta = event.globalPos() - self._press_global_pos
+                    if delta.manhattanLength() < DRAG_THRESHOLD_PX:
+                        event.accept()
+                        return
+                # 确认拖拽 → 打断思考/请求，切换 Dangle
                 self.drag_moved = True
                 self._interrupt_dialogue()
                 if not self.is_sleeping:
                     self.set_avatar("Remy_Dangle.png")
+                self.drag_pos = (
+                    event.globalPos() - self.frameGeometry().topLeft()
+                )
             # 移动时唤醒
             if self.is_sleeping:
                 self.wake_up()
             self.move(event.globalPos() - self.drag_pos)
             event.accept()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._bind_screen_change()
+
+    def _bind_screen_change(self) -> None:
+        handle = self.windowHandle()
+        if handle is None or self._screen_change_bound:
+            return
+        handle.screenChanged.connect(self._on_screen_changed)
+        self._screen_change_bound = True
+
+    def _on_screen_changed(self, _screen) -> None:
+        QTimer.singleShot(0, self._restore_window_metrics)
+        QTimer.singleShot(50, self._restore_window_metrics)
+
+    def _restore_window_metrics(self) -> None:
+        """跨分辨率屏幕后强制恢复人物与窗口对齐。"""
+        self.avatar_label.setFixedSize(200, 200)
+        self.setMinimumSize(200, 250)
+        self.set_avatar(self._current_avatar)
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()
+        hint = self.sizeHint()
+        width = max(200, hint.width())
+        height = max(250, hint.height())
+        self.resize(width, height)
+        self.update()
+        self.thinking.on_move()
+        self.thinking.on_resize()
 
     def _interrupt_dialogue(self):
         """打断当前所有对话和动画，立即隐藏气泡，重置所有状态"""
@@ -455,6 +532,10 @@ class RemyDesktopPet(QWidget):
         self.bubble_label.setText("")
         self.thinking.hide()
         self._pending_reply = ""
+        # 作废进行中的 API，避免返回后再次弹出思考/回复
+        self._request_seq += 1
+        self._api_in_flight = False
+        self.input_box.setEnabled(True)
         # 清空消息队列
         self.message_queue.clear()
         # 重置所有状态
@@ -478,13 +559,20 @@ class RemyDesktopPet(QWidget):
         self.last_drag_phrase = chosen
         phrase = config.DRAG_RELEASE_PHRASES[chosen]
 
-        # 显示台词，使用指定头像
+        # 标记为拖拽松台词，避免挡住用户随后发送的对话
+        self.is_drag_releasing = True
         self.show_typed_message(phrase, is_user=False, override_avatar=chosen)
 
     def random_emotion_click(self):
         """点击头像时按随机队列顺序切换表情并说对应的硬编码台词"""
-        # 如果正在说话、打字或处理消息中，忽略点击
-        if self.is_speaking or self.is_typing or self.is_processing_message:
+        # 说话/打字/处理中，或思考/请求中，单击不打断
+        if (
+            self.is_speaking
+            or self.is_typing
+            or self.is_processing_message
+            or self._api_in_flight
+            or self.thinking.is_visible()
+        ):
             return
 
         self.last_interaction_time = time.time()
@@ -658,12 +746,14 @@ class RemyDesktopPet(QWidget):
         """完成Remy的回复显示"""
         self.is_speaking = False
         self.is_waiting_for_click = False
+        self.is_drag_releasing = False
 
         self.is_processing_message = False
 
         if self.fade_timer.isActive():
             self.fade_timer.stop()
-        # 延迟后淡出气泡（同时还原头像）
+        # 延迟后淡出气泡（同时还原头像）；与思考气泡一起隐藏
+        self._fade_hides_thinking = True
         self.fade_timer.singleShot(2000, self.fade_out_bubble)
 
         self.process_next_message()
@@ -677,7 +767,8 @@ class RemyDesktopPet(QWidget):
 
         if self.fade_timer.isActive():
             self.fade_timer.stop()
-        # 延迟后淡出气泡（同时还原头像）
+        # 用户气泡淡出时不打断思考气泡
+        self._fade_hides_thinking = False
         self.fade_timer.singleShot(1500, self.fade_out_bubble)
 
         self.process_next_message()
@@ -690,8 +781,8 @@ class RemyDesktopPet(QWidget):
     def fade_out_bubble(self):
         """淡出气泡并同步还原头像为闭口（睡眠状态则保持睡眠头像）"""
         if not self.is_processing_message and not self.is_speaking and not self.is_typing and not self.is_waiting_for_click:
-            # 还原头像（与淡出同步），但睡眠状态不覆盖
-            if not self.is_sleeping:
+            # 思考中保持 Sleep 立绘；真实睡眠也不覆盖
+            if not self.is_sleeping and not self.thinking.is_visible():
                 self.set_avatar('Remy_Shut.png')
 
             # 淡出动画
@@ -704,7 +795,9 @@ class RemyDesktopPet(QWidget):
 
     def _on_fade_out_finished(self):
         """淡出动画完成后的清理"""
-        self.thinking.hide()
+        if self._fade_hides_thinking:
+            self.thinking.hide()
+            self._fade_hides_thinking = False
         self.bubble_label.hide()
         self.bubble_label.setText("")
         self.is_drag_releasing = False  # 解除拖拽保护
@@ -712,33 +805,37 @@ class RemyDesktopPet(QWidget):
             self.is_processing_message = False
 
     def send_message(self):
-        if self.is_speaking or self.is_typing or self.is_processing_message:
-            print(f"[Remy Debug] send_message blocked: is_speaking={self.is_speaking}, is_typing={self.is_typing}, is_processing_message={self.is_processing_message}")
-            # 防御性重置：如果processing状态超过30秒，强制重置
-            if hasattr(self, '_process_start_time') and time.time() - self._process_start_time > 30:
+        user_input = self.input_box.text().strip()
+        if not user_input:
+            return
+
+        busy = (
+            self.is_speaking
+            or self.is_typing
+            or self.is_processing_message
+            or self.is_drag_releasing
+            or self._api_in_flight
+            or self.thinking.is_visible()
+        )
+        if busy:
+            stuck = (
+                self._process_start_time
+                and time.time() - self._process_start_time > 30
+            )
+            if stuck:
                 print("[Remy Debug] Force resetting stuck processing flag!")
-                self.is_processing_message = False
-                self.is_speaking = False
-                self.is_typing = False
-                self.is_waiting_for_click = False
-                self.input_box.setEnabled(True)
-                # 不return，继续处理
-            else:
-                # 正常等待中，提示用户稍等
-                print("[Remy Debug] Normal wait - message queue size:", len(self.message_queue))
-                return
+            self._interrupt_dialogue()
 
         # 唤醒（如果处于睡眠状态）
         if self.is_sleeping:
             self.wake_up()
 
-        user_input = self.input_box.text().strip()
-        if not user_input:
-            return
-
         self.input_box.clear()
         self.input_box.setEnabled(False)
         self.last_interaction_time = time.time()
+        self._request_seq += 1
+        request_id = self._request_seq
+        self._api_in_flight = True
 
         # 记录处理开始时间，用于防御性超时检测
         self._process_start_time = time.time()
@@ -753,9 +850,14 @@ class RemyDesktopPet(QWidget):
         })
         config.save_conversation()
 
-        threading.Thread(target=self.call_api, args=(user_input,), daemon=True).start()
+        threading.Thread(
+            target=self.call_api,
+            args=(user_input, request_id,),
+            daemon=True,
+        ).start()
 
-    def call_api(self, user_input: str, extra_content=None) -> None:
+        """调用 AI API，支持主备线路自动故障切换"""
+    def call_api(self, user_input: str, request_id: int, extra_content=None) -> None:
         """调用 AI API，支持主备线路自动故障切换。
 
         extra_content：可选。识图等场景需要在不污染历史的前提下，
@@ -819,18 +921,22 @@ class RemyDesktopPet(QWidget):
                     thinking_enabled and supports_thinking(provider)
                 )
                 timeout = 60 if reasoning_streamed else 30
+                if self._request_seq != request_id:
+                    return
                 if reasoning_streamed:
                     QMetaObject.invokeMethod(
                         self,
                         "show_thinking_bubble",
                         Qt.QueuedConnection,
                         Q_ARG(str, "大脑在快速思考中..."),
+                        Q_ARG(int, request_id),
                     )
                 else:
                     QMetaObject.invokeMethod(
                         self,
                         "hide_thinking_bubble",
                         Qt.QueuedConnection,
+                        Q_ARG(int, request_id),
                     )
 
                 print(f"[Remy Debug] [{label}] Calling API: {url}")
@@ -845,25 +951,24 @@ class RemyDesktopPet(QWidget):
                         timeout=timeout,
                         stream=reasoning_streamed,
                     )
+                    if self._request_seq != request_id:
+                        return
                     print(f"[Remy Debug] [{label}] API response status: {response.status_code}")
 
                     if response.status_code == 200:
                         if reasoning_streamed:
                             reasoning, reply = self._consume_stream_response(
                                 response,
-                                label,
+                                request_id,
                             )
                         else:
                             result = json.loads(response.text)
                             message = result["choices"][0]["message"]
                             reply = message.get("content") or ""
                             reasoning = extract_reasoning(message)
+                        if self._request_seq != request_id:
+                            return
                         print(f"[Remy Debug] [{label}] API reply: {reply}")
-                        if reasoning:
-                            print(
-                                f"[Remy Debug] [{label}] Reasoning preview: "
-                                f"{reasoning[:120]}"
-                            )
 
                         QMetaObject.invokeMethod(
                             self,
@@ -874,6 +979,7 @@ class RemyDesktopPet(QWidget):
                             Q_ARG(bool, attempt == 1),
                             Q_ARG(str, provider["name"]),
                             Q_ARG(bool, reasoning_streamed),
+                            Q_ARG(int, request_id),
                         )
                         return
                     else:
@@ -883,6 +989,8 @@ class RemyDesktopPet(QWidget):
                             continue
 
                 except Exception as inner_e:
+                    if self._request_seq != request_id:
+                        return
                     print(f"[Remy Debug] [{label}] API exception: {type(inner_e).__name__}: {inner_e}")
                     if attempt == 0:
                         print("[Remy Debug] 主线路异常，尝试备用线路...")
@@ -892,23 +1000,33 @@ class RemyDesktopPet(QWidget):
                         response.close()
 
             # 两条线路都失败
+            if self._request_seq != request_id:
+                return
             raise Exception("所有API线路均失败，请检查网络连接和API Key配置")
 
         except Exception as e:
+            if self._request_seq != request_id:
+                return
             print(f"[Remy Debug] API fatal error: {type(e).__name__}: {e}")
-            QMetaObject.invokeMethod(self, "_on_api_error",
-                                   Qt.QueuedConnection,
-                                   Q_ARG(str, str(e)))
+            QMetaObject.invokeMethod(
+                self,
+                "_on_api_error",
+                Qt.QueuedConnection,
+                Q_ARG(str, str(e)),
+                Q_ARG(int, request_id),
+            )
 
     def _consume_stream_response(
         self,
         response: requests.Response,
-        label: str,
+        request_id: int,
     ) -> tuple[str, str]:
         reasoning_parts: list[str] = []
         reply_parts: list[str] = []
 
         for raw_line in response.iter_lines(decode_unicode=True):
+            if self._request_seq != request_id:
+                break
             if not raw_line:
                 continue
             if isinstance(raw_line, bytes):
@@ -923,11 +1041,7 @@ class RemyDesktopPet(QWidget):
                 break
             try:
                 chunk = json.loads(payload)
-            except json.JSONDecodeError as error:
-                print(
-                    f"[Remy Debug] [{label}] Stream chunk parse error: "
-                    f"{error}"
-                )
+            except json.JSONDecodeError:
                 continue
 
             if not isinstance(chunk, dict):
@@ -952,6 +1066,7 @@ class RemyDesktopPet(QWidget):
                     "update_thinking_bubble",
                     Qt.QueuedConnection,
                     Q_ARG(str, reasoning),
+                    Q_ARG(int, request_id),
                 )
             if isinstance(reply_piece, str) and reply_piece:
                 reply_parts.append(reply_piece)
@@ -982,13 +1097,21 @@ class RemyDesktopPet(QWidget):
 
     def on_image_dropped(self, image_path):
         """拖入图片入口：镜像 send_message 的守卫/唤醒/气泡/线程流程"""
-        if self.is_speaking or self.is_typing or self.is_processing_message:
+        if (
+            self.is_speaking
+            or self.is_typing
+            or self.is_processing_message
+            or self._api_in_flight
+        ):
             return
         if self.is_sleeping:
             self.wake_up()
 
         self.input_box.setEnabled(False)
         self.last_interaction_time = time.time()
+        self._request_seq += 1
+        request_id = self._request_seq
+        self._api_in_flight = True
         self._process_start_time = time.time()
 
         self.show_typed_message("📷 [图片]", is_user=True)
@@ -1001,25 +1124,32 @@ class RemyDesktopPet(QWidget):
         config.save_conversation()
 
         threading.Thread(
-            target=self.call_vision_api, args=(image_path,), daemon=True
+            target=self.call_vision_api, args=(image_path, request_id), daemon=True
         ).start()
 
-    def call_vision_api(self, image_path):
+    def call_vision_api(self, image_path, request_id):
         """后台线程：图片 → 视觉描述 → DeepSeek 人设回复"""
         try:
+            if self._request_seq != request_id:
+                return
             data_uri = image_to_data_uri(image_path)
             description = self._request_vision_description(data_uri)
+            if self._request_seq != request_id:
+                return
             persona_msg = (
                 f"（调查员给蕾咪看了一张图，内容是：{description}）"
                 "请用蕾咪的傲娇语气，简单说说你看到了什么。"
             )
-            self.call_api("", extra_content=persona_msg)
+            self.call_api("", request_id, extra_content=persona_msg)
         except Exception as e:
+            if self._request_seq != request_id:
+                return
             print(f"[Remy Debug] Vision error: {type(e).__name__}: {e}")
             QMetaObject.invokeMethod(
                 self, "_on_api_error",
                 Qt.QueuedConnection,
                 Q_ARG(str, str(e)),
+                Q_ARG(int, request_id),
             )
 
     def _request_vision_description(self, data_uri):
@@ -1086,7 +1216,7 @@ class RemyDesktopPet(QWidget):
         if reply:
             self.show_typed_message(reply, is_user=False)
 
-    @pyqtSlot(str, str, bool, str, bool)
+    @pyqtSlot(str, str, bool, str, bool, int)
     def _on_api_success(
         self,
         reply: str,
@@ -1094,12 +1224,16 @@ class RemyDesktopPet(QWidget):
         used_fallback: bool,
         provider_name: str,
         reasoning_streamed: bool,
+        request_id: int,
     ) -> None:
         """API 调用成功，处理回复"""
+        if request_id != self._request_seq:
+            return
         try:
             print(f"[Remy Debug] API success via {provider_name}, fallback={used_fallback}")
 
             reply = self._prepare_reply_text(reply, used_fallback)
+            reasoning = normalize_reasoning(reasoning)
 
             # 统计"喜欢你"出现次数（精确匹配这三个字）
             like_hits = reply.count("喜欢你")
@@ -1115,28 +1249,37 @@ class RemyDesktopPet(QWidget):
 
             self._pending_reply = reply
             if reasoning:
+                self._enter_thinking_pose()
                 if reasoning_streamed:
-                    self._deliver_pending_reply()
+                    self.thinking.update_streaming_preview(reasoning)
+                    self.thinking.finish_streaming(
+                        self._deliver_pending_reply,
+                    )
                 else:
                     self.thinking.show_preview(
                         reasoning,
                         on_finished=self._deliver_pending_reply,
-                        hold_ms=PREVIEW_MS,
                     )
             else:
                 self.thinking.hide()
                 self._deliver_pending_reply()
         except Exception as e:
             print(f"[Remy Debug] Parse exception: {type(e).__name__}: {e}")
+            self._api_in_flight = False
             self.thinking.hide()
             self._pending_reply = ""
             self.show_typed_message(f"⚠️ 解析失败: {str(e)[:30]}", is_user=False)
+        else:
+            self._api_in_flight = False
         finally:
             self.input_box.setEnabled(True)
 
-    @pyqtSlot(str)
-    def _on_api_error(self, error_msg: str) -> None:
+    @pyqtSlot(str, int)
+    def _on_api_error(self, error_msg: str, request_id: int) -> None:
+        if request_id != self._request_seq:
+            return
         print(f"[Remy Debug] Network error: {error_msg}")
+        self._api_in_flight = False
         self.thinking.hide()
         self._pending_reply = ""
         self.show_typed_message(f"⚠️ 网络错误: {error_msg[:30]}", is_user=False)
@@ -1196,11 +1339,8 @@ class RemyDesktopPet(QWidget):
                     else:
                         msg = f"📋 复制了 {len(current)} 字文本"
                     QTimer.singleShot(0, lambda: self.show_typed_message(msg, is_user=False))
-        except Exception as error:
-            print(
-                f"[Remy Debug] Clipboard check failed: "
-                f"{type(error).__name__}: {error}"
-            )
+        except Exception:
+            pass
 
     def show_context_menu(self, pos):
         menu = QMenu()
@@ -1262,7 +1402,15 @@ class RemyDesktopPet(QWidget):
         menu.addSeparator()
         menu.addAction("❌ 退出").triggered.connect(self.quit_app)
 
-        menu.exec_(self.mapToGlobal(pos))
+        self.thinking.set_menu_open(True)
+        # 确保菜单不低于置顶的思考窗
+        menu.setWindowFlags(
+            menu.windowFlags() | Qt.WindowStaysOnTopHint
+        )
+        try:
+            menu.exec_(self.mapToGlobal(pos))
+        finally:
+            self.thinking.set_menu_open(False)
 
     def open_history(self):
         dialog = HistoryDialog(self)
@@ -1348,6 +1496,7 @@ class RemyDesktopPet(QWidget):
 
     def closeEvent(self, event):
         """关闭窗口时隐藏到系统托盘，而不是退出程序"""
+        self.thinking.hide()
         self.hide()
         self.tray_icon.showMessage(
             "Remy 桌宠",

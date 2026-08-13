@@ -17,11 +17,17 @@ API Key 请写在项目根目录的 config.json 里。
 import sys
 
 from PyQt5.QtWidgets import QApplication, QMessageBox
-from PyQt5.QtCore import QSharedMemory
+from PyQt5.QtCore import Qt, QSharedMemory
 
 from desktop_pet import RemyDesktopPet
 
 if __name__ == "__main__":
+    # 跨屏不同 DPI 时减少窗口几何错乱
+    if hasattr(Qt, "AA_EnableHighDpiScaling"):
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    if hasattr(Qt, "AA_UseHighDpiPixmaps"):
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
     # ====== 禁止多开：使用共享内存检测 ======
     app = QApplication(sys.argv)
     shared_mem = QSharedMemory("RemyDesktopPet_SingleInstance")
