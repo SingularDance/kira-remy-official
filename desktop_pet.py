@@ -605,6 +605,7 @@ class RemyDesktopPet(QWidget):
         self.is_waiting_for_click = False
         self.is_processing_message = False
         self.is_drag_releasing = False
+        self._apply_dialog_geometry()  # 气泡被移除后窗口缩回
 
     def drag_release_emotion(self):
         """拖拽松开时随机选择 Remy_Angry/Remy_Wronged/Remy_Happy 并说硬编码台词"""
@@ -743,6 +744,15 @@ class RemyDesktopPet(QWidget):
         self._fade_anim.setStartValue(0.0)
         self._fade_anim.setEndValue(1.0)
         self._fade_anim.start()
+        # 按完整文本预留气泡空间：气泡显示在立绘下方而非压在立绘上，
+        # 窗口只增高底部高度（顶部锚定），立绘位置保持不变，打字期间窗口尺寸稳定
+        if len(text) > 0:
+            self.bubble_label.setText(text)
+        self._apply_dialog_geometry()
+        if len(text) > 0:
+            self.bubble_label.setText(text[0])
+        else:
+            self.bubble_label.setText("")
 
         self.type_text = text
         self.type_index = 1
@@ -864,6 +874,7 @@ class RemyDesktopPet(QWidget):
         self.is_drag_releasing = False  # 解除拖拽保护
         if not self.message_queue:
             self.is_processing_message = False
+        self._apply_dialog_geometry()  # 气泡移除后窗口缩回
 
     def send_message(self):
         user_input = self.input_box.text().strip()
