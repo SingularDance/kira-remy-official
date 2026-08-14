@@ -8,9 +8,11 @@ Remy 桌宠 - 小游戏包
 from dialogs.games.rps import RPSDialog
 from dialogs.games.game_2048 import Game2048Dialog
 from dialogs.games.dice import DiceDialog
+from dialogs.games.battleship import BattleshipDialog
 
 __all__ = [
     "RPSDialog",
     "Game2048Dialog",
     "DiceDialog",
+    "BattleshipDialog",
 ]

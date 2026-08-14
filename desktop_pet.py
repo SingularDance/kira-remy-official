@@ -56,7 +56,7 @@ import config
 from dialogs import (
     HistoryDialog, HelpDialog, SettingsDialog, MasterProfileDialog,
     NoteDialog, RPSDialog, Game2048Dialog, DiceDialog, APISettingsDialog,
-    APISetupWizard, MysteryNumberManager, WallpaperPickerDialog
+    APISetupWizard, MysteryNumberManager, WallpaperPickerDialog, BattleshipDialog
 )
 from thinking import (
     ThinkingController,
@@ -1383,6 +1383,7 @@ class RemyDesktopPet(QWidget):
         game_menu.addAction("🔢 2048").triggered.connect(self.open_2048)
         game_menu.addAction("✊ 猜拳").triggered.connect(self.open_rps)
         game_menu.addAction("🎲 掷骰子").triggered.connect(self.open_dice)
+        game_menu.addAction("🚢 海战棋").triggered.connect(self.open_battleship)
 
         menu.addAction("🖼️ 切换壁纸").triggered.connect(self.open_wallpaper_picker)
 
@@ -1454,6 +1455,10 @@ class RemyDesktopPet(QWidget):
 
     def open_dice(self):
         dialog = DiceDialog(self)
+        dialog.exec_()
+
+    def open_battleship(self):
+        dialog = BattleshipDialog(self)
         dialog.exec_()
 
     def show_mystery_number(self):
