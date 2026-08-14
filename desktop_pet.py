@@ -40,6 +40,7 @@ from PyQt5.QtCore import (
 from PyQt5.QtGui import (
     QBrush,
     QColor,
+    QCursor,
     QFont,
     QIcon,
     QMoveEvent,
@@ -133,6 +134,12 @@ class RemyDesktopPet(QWidget):
         self.type_text = ""
         self.type_index = 0
 
+        # 悬停控制：鼠标不在蕾咪身上（可点击范围）时隐藏输入框和气泡
+        self._dialog_visible = False
+        self.hover_timer = QTimer()
+        self.hover_timer.timeout.connect(self._sync_hover_state)
+        self.hover_timer.start(250)
+
         self.idle_timer = QTimer()
         self.idle_timer.timeout.connect(self.check_idle)
         self.idle_timer.start(30000)
@@ -147,7 +154,8 @@ class RemyDesktopPet(QWidget):
         self.mystery_number = MysteryNumberManager(self)
 
         QTimer.singleShot(500, self.show_welcome)
-        self.setMinimumSize(200, 250)
+        # 初始为仅立绘大小（200x200），悬停显示对话框后由 _apply_dialog_geometry 扩展
+        self.setMinimumSize(200, 200)
 
     def show_welcome(self):
         self.show_typed_message("系统启动成功！我叫蕾咪~来自5000年后！", is_user=False)
@@ -241,6 +249,10 @@ class RemyDesktopPet(QWidget):
             }
         """)
         input_layout.addWidget(send_btn)
+        self.send_btn = send_btn
+        # 初始为仅立绘状态，悬停后由 _set_dialog_visible 显示
+        self.input_box.hide()
+        self.send_btn.hide()
 
         main_layout.addLayout(input_layout)
         self.setLayout(main_layout)
@@ -373,6 +385,11 @@ class RemyDesktopPet(QWidget):
             self.raise_()
             self.activateWindow()
 
+    def _focus_input_from_tray(self):
+        """托盘菜单唤起输入框：先显示对话框再聚焦"""
+        self._set_dialog_visible(True)
+        self.input_box.setFocus()
+
     def quit_app(self):
         """完全退出程序"""
         self.thinking.hide()
@@ -489,6 +506,8 @@ class RemyDesktopPet(QWidget):
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self._bind_screen_change()
+        QTimer.singleShot(0, self._sync_hover_state)
+        QTimer.singleShot(0, self._apply_dialog_geometry)
 
     def _bind_screen_change(self) -> None:
         handle = self.windowHandle()
@@ -504,18 +523,73 @@ class RemyDesktopPet(QWidget):
     def _restore_window_metrics(self) -> None:
         """跨分辨率屏幕后强制恢复人物与窗口对齐。"""
         self.avatar_label.setFixedSize(200, 200)
-        self.setMinimumSize(200, 250)
         self.set_avatar(self._current_avatar)
         layout = self.layout()
         if layout is not None:
             layout.activate()
-        hint = self.sizeHint()
-        width = max(200, hint.width())
-        height = max(250, hint.height())
-        self.resize(width, height)
+        if self._dialog_visible:
+            self.setMinimumSize(200, 250)
+            hint = self.sizeHint()
+            self.resize(max(200, hint.width()), max(250, hint.height()))
+        else:
+            self.setMinimumSize(200, 200)
+            self.resize(200, 200)
         self.update()
         self.thinking.on_move()
         self.thinking.on_resize()
+
+    def _sync_hover_state(self) -> None:
+        """轮询鼠标位置：仅当鼠标位于蕾咪身上（可点击范围）时显示对话框"""
+        if not self.isVisible() or self.drag_pos is not None:
+            return
+        inside = self.rect().contains(self.mapFromGlobal(QCursor.pos()))
+        # 输入框获得焦点时（正在打字）即使鼠标移开也保持显示
+        self._set_dialog_visible(inside or self.input_box.hasFocus())
+
+    def _set_dialog_visible(self, visible: bool) -> None:
+        """切换对话框（输入框+气泡）的显隐，状态不变时不做任何事"""
+        if visible == self._dialog_visible:
+            return
+        self._dialog_visible = visible
+        if visible:
+            self._show_dialog_widgets()
+        else:
+            self._hide_dialog_widgets()
+        self._apply_dialog_geometry()
+
+    def _show_dialog_widgets(self) -> None:
+        self.input_box.show()
+        self.send_btn.show()
+        # 有未读完的内容时恢复气泡（打字/说话继续在后台进行）
+        if self.bubble_label.text():
+            if self._fade_anim is not None:
+                self._fade_anim.stop()
+            self.bubble_opacity.setOpacity(1.0)
+            self.bubble_label.show()
+
+    def _hide_dialog_widgets(self) -> None:
+        self.input_box.hide()
+        self.send_btn.hide()
+        if self.bubble_label.isVisible():
+            if self._fade_anim is not None:
+                self._fade_anim.stop()
+            self.bubble_label.hide()
+            # 消息已展示完毕时直接清空，避免悬停回来时残留旧台词
+            if not (self.is_speaking or self.is_typing or self.is_waiting_for_click):
+                self.bubble_label.setText("")
+
+    def _apply_dialog_geometry(self) -> None:
+        """对话框隐藏时窗口收缩为仅立绘(200x200)，显示时恢复完整尺寸"""
+        if self._dialog_visible:
+            self.setMinimumSize(200, 250)
+            layout = self.layout()
+            if layout is not None:
+                layout.activate()
+            self.adjustSize()
+        else:
+            # 布局 sizeHint 会残留隐藏输入框的高度，直接显式收缩
+            self.setMinimumSize(200, 200)
+            self.resize(200, 200)
 
     def _interrupt_dialogue(self):
         """打断当前所有对话和动画，立即隐藏气泡，重置所有状态"""
@@ -682,6 +756,11 @@ class RemyDesktopPet(QWidget):
         self._fade_anim.setStartValue(0.0)
         self._fade_anim.setEndValue(1.0)
         self._fade_anim.start()
+        # 鼠标不在蕾咪附近时，气泡在后台继续打字但不显示
+        if not self._dialog_visible:
+            if self._fade_anim is not None:
+                self._fade_anim.stop()
+            self.bubble_label.hide()
 
         self.type_text = text
         self.type_index = 1
@@ -1368,7 +1447,7 @@ class RemyDesktopPet(QWidget):
             }
         """)
 
-        menu.addAction("💬 发送消息").triggered.connect(lambda: self.input_box.setFocus())
+        menu.addAction("💬 发送消息").triggered.connect(self._focus_input_from_tray)
         menu.addSeparator()
         menu.addAction("📜 历史记录").triggered.connect(self.open_history)
         menu.addAction("📖 帮助/说明").triggered.connect(self.open_help)
