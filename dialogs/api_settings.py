@@ -16,6 +16,17 @@ from PyQt5.QtCore import Qt
 
 import config
 
+# 首次启动引导与 API 设置对话框共用的提示文案
+_API_SAVED_MSG = "✅ API 配置已写入 config.json。\n蕾咪现在可以和你聊天啦~"
+_SKIP_CONFIRM_MSG = (
+    "⚠️ 当前未配置 API Key，是否确认跳过？\n\n"
+    "没有 API Key 蕾咪将无法和你聊天哦。\n\n"
+    "💡 之后可以：\n"
+    "· 右键蕾咪 →「🔑 API 设置」\n"
+    "· 或编辑项目目录里的 config.json\n"
+    "（可先复制 config.example.json）"
+)
+
 
 class APISettingsDialog(QDialog):
     def __init__(self, parent=None):
@@ -380,9 +391,9 @@ class APISettingsDialog(QDialog):
         """)
         btn_layout.addWidget(save_btn)
 
-        skip_btn = QPushButton("跳过（稍后设置）")
-        skip_btn.clicked.connect(self.confirm_skip)
-        skip_btn.setStyleSheet("""
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.reject)
+        close_btn.setStyleSheet("""
             QPushButton {
                 background-color: #cccccc;
                 color: #666666;
@@ -393,7 +404,7 @@ class APISettingsDialog(QDialog):
             }
             QPushButton:hover { background-color: #bbbbbb; }
         """)
-        btn_layout.addWidget(skip_btn)
+        btn_layout.addWidget(close_btn)
 
         layout.addLayout(btn_layout)
         self.setLayout(layout)
@@ -464,7 +475,7 @@ class APISettingsDialog(QDialog):
         vision_key = self.vision_key_input.text().strip()
 
         if not primary_key:
-            QMessageBox.warning(self, "提示", "⚠️ 请至少填写主线路的 API Key！\n\n如果暂时不想配置，请点「跳过」。")
+            QMessageBox.warning(self, "提示", "⚠️ 请至少填写主线路的 API Key！\n\n如果暂时不想配置，请点「关闭」。")
             return
 
         config.CONFIG["api"] = {
@@ -479,29 +490,8 @@ class APISettingsDialog(QDialog):
 
         config.save_config()
 
-        QMessageBox.information(
-            self,
-            "成功",
-            "✅ API 配置已写入 config.json。\n蕾咪现在可以和你聊天啦~"
-        )
+        QMessageBox.information(self, "成功", _API_SAVED_MSG)
         self.accept()
-
-    def confirm_skip(self):
-        """跳过按钮：弹出二次确认"""
-        reply = QMessageBox.question(
-            self,
-            "确认跳过",
-            "⚠️ 当前未配置 API Key，是否确认跳过？\n\n"
-            "没有 API Key 蕾咪将无法和你聊天哦。\n\n"
-            "💡 之后可以：\n"
-            "· 右键蕾咪 →「🔑 API 设置」\n"
-            "· 或编辑项目目录里的 config.json\n"
-            "（可先复制 config.example.json）",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            self.reject()
 
 
 class APISetupWizard(QDialog):
@@ -758,10 +748,31 @@ class APISetupWizard(QDialog):
 
         config.save_config()
 
+    def _finish(self):
+        """最后一步「完成」：语言+视觉都配好 → 成功提示；否则二次确认跳过。"""
+        api = config.CONFIG.get("api", {})
+        has_primary = bool((api.get("primary_key") or "").strip())
+        has_vision = bool((api.get("vision_key") or "").strip())
+        if has_primary and has_vision:
+            QMessageBox.information(self, "成功", _API_SAVED_MSG)
+            self.accept()
+            return
+
+        reply = QMessageBox.question(
+            self, "确认跳过", _SKIP_CONFIRM_MSG,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self.accept()
+        else:
+            # 回到第一个缺 Key 的步骤，让用户补填
+            self._step = 0 if not has_primary else 1
+            self._render_step()
+
     def _on_next(self):
         self._save_current_step()
         if self._step == len(self.STEPS) - 1:
-            self.accept()
+            self._finish()
         else:
             self._step += 1
             self._render_step()

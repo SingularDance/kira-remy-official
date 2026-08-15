@@ -12,7 +12,7 @@ if exist "*.spec" del *.spec
 echo [√] 清理完成
 
 echo [2/3] 开始打包...
-python -m PyInstaller --onefile --windowed --name "星夜颂歌-蕾咪！" ^
+py -m PyInstaller --onefile --windowed --name "星夜颂歌-蕾咪！" ^
     --icon="Remybaby.ico" ^
     --add-data "Remy_Shut.png;." ^
     --add-data "Remy_Open.png;." ^

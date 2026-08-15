@@ -16,6 +16,8 @@ from dialogs.games.dice import DiceDialog
 from dialogs.api_settings import APISettingsDialog, APISetupWizard
 from dialogs.mystery_number import MysteryNumberManager
 from dialogs.wallpaper_picker import WallpaperPickerDialog
+from dialogs.update_dialog import UpdateDialog
+from dialogs.about_dialog import AboutDialog
 
 __all__ = [
     "HistoryDialog",
@@ -30,4 +32,6 @@ __all__ = [
     "APISetupWizard",
     "MysteryNumberManager",
     "WallpaperPickerDialog",
+    "UpdateDialog",
+    "AboutDialog",
 ]

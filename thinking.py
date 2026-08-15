@@ -28,7 +28,7 @@ from PyQt5.QtWidgets import QLabel, QTextEdit, QWidget
 
 COMPLETION_MAX_TOKENS = 2048
 NON_THINKING_MAX_TOKENS = 128
-GENERIC_THOUGHT = "大脑在快速思考中..."
+GENERIC_THOUGHT = "蕾咪思考中……"
 PLACEHOLDER_REASONING = frozenset({"...", "……", "嗯...", "嗯……"})
 MIN_THINKING_DURATION_MS = 800
 MAX_THINKING_DURATION_MS = 20000
@@ -39,7 +39,6 @@ HOLD_MS_PER_CHAR = 50
 HOLD_MAX_MS = 20000
 MIN_TEXT_WIDTH = 104
 PREFERRED_TEXT_WIDTH = 140
-MAX_TEXT_WIDTH = 420
 MIN_BUBBLE_HEIGHT = 72
 HORIZONTAL_PADDING = 28
 TOP_PADDING = 20
@@ -659,29 +658,24 @@ class ThinkingController:
         screen_rect: QRect,
         on_right: bool,
     ) -> tuple[int, int, bool]:
-        """固定画布内长高；仅触顶时一次性加宽，避免逐字改窗闪烁。"""
+        """固定画布内长高；仅触顶时一次性加宽，避免逐字改窗闪烁。
+
+        画布上限是动态的：宽 = 锚点 → 所在侧屏幕边，高 = 锚点 → 屏幕上沿。
+        这样气泡永不越过头部向下、不遮住桌宠，也不溢出屏幕。
+        """
         anchor_bottom = head_y + VERTICAL_GAP
         if on_right:
             anchor_edge = head_x + HORIZONTAL_GAP
             primary_span = max(0, screen_rect.right() - anchor_edge + 1)
-            secondary_span = max(0, anchor_edge - screen_rect.left())
             tail_on_right = False
         else:
             anchor_edge = head_x - HORIZONTAL_GAP
             primary_span = max(0, anchor_edge - screen_rect.left() + 1)
-            secondary_span = max(0, screen_rect.right() - anchor_edge)
             tail_on_right = True
 
+        # 高上限 = 锚点（气泡底边）到屏幕上沿；宽度上限 = 锚点到所在侧屏幕边
         space_up = max(MIN_BUBBLE_HEIGHT, anchor_bottom - screen_rect.top())
-        space_down = max(0, screen_rect.bottom() - anchor_bottom + 1)
-        max_height = max(
-            MIN_BUBBLE_HEIGHT,
-            screen_rect.bottom() - screen_rect.top() + 1,
-        )
         primary_text_max = self._text_width_budget(primary_span)
-        total_text_max = self._text_width_budget(
-            primary_span + secondary_span,
-        )
 
         if self._locked_text_width <= 0:
             self._locked_text_width = min(
@@ -695,6 +689,7 @@ class ThinkingController:
         text_width = max(MIN_TEXT_WIDTH, self._locked_text_width)
         content_h = self._bubble.measure_height(text_width)
 
+        # 顶到屏幕上沿时先加宽（到所在侧屏幕边），加宽后仍超则靠内部滚动
         if content_h > space_up and primary_text_max > text_width:
             wider = self._fit_text_width(space_up, primary_text_max)
             if wider > text_width:
@@ -702,21 +697,11 @@ class ThinkingController:
                 self._locked_text_width = wider
                 content_h = self._bubble.measure_height(text_width)
 
-        canvas_h = min(max(content_h, space_up), max_height)
-        if content_h > space_up:
-            canvas_h = min(max(content_h, space_up), space_up + space_down)
-            canvas_h = min(canvas_h, max_height)
-            if content_h > canvas_h and total_text_max > text_width:
-                wider = self._fit_text_width(canvas_h, total_text_max)
-                if wider > text_width:
-                    text_width = wider
-                    self._locked_text_width = wider
-                    content_h = self._bubble.measure_height(text_width)
-                    canvas_h = min(max(content_h, canvas_h), max_height)
-
+        # 高度永不越过屏幕上沿；宽度不越过所在侧屏幕边
+        canvas_h = max(MIN_BUBBLE_HEIGHT, min(content_h, space_up))
         canvas_w = text_width + HORIZONTAL_PADDING * 2
         if not self._bubble.has_canvas():
-            canvas_h = max(canvas_h, min(space_up, max_height))
+            canvas_h = max(canvas_h, space_up)   # 首帧仍预留 space_up，保持"只增不减"不闪烁
             canvas_w = max(
                 canvas_w,
                 min(
@@ -745,7 +730,7 @@ class ThinkingController:
 
     def _text_width_budget(self, bubble_span: int) -> int:
         usable = bubble_span - HORIZONTAL_PADDING * 2
-        return max(MIN_TEXT_WIDTH, min(MAX_TEXT_WIDTH, usable))
+        return max(MIN_TEXT_WIDTH, usable)
 
     def _fit_text_width(
         self,

@@ -9,6 +9,7 @@ API Key 请写在项目根目录的 config.json 里。
 
 import os
 import json
+import re
 from datetime import datetime
 
 from utils import resource_path
@@ -100,6 +101,15 @@ def default_config():
         "master_birthday": "2000-01-01",
         "master_gender": "未知",
         "wallpaper_folder": "",
+        # 更新检查。owner/repo 指向发布仓库（GitHub Releases），
+        # 与代码托管的 Gitee 不是同一处；做成可配是为了便于指向测试仓库。
+        "update": {
+            "enabled": True,
+            "owner": "SingularDance",
+            "repo": "kira-remy-official",
+            "skip_version": "",
+            "last_check_date": "",
+        },
         "api": {
             "primary": "deepseek",
             "primary_key": "",
@@ -119,6 +129,20 @@ def sanitize_config(cfg):
     cfg = dict(cfg)
     cfg.pop("_说明", None)
     cfg.setdefault("wallpaper_folder", "")
+
+    # update 段：老用户的 config.json 里没有这个键，必须补齐，
+    # 否则「跳过此版本」和「每天只查一次」没有地方持久化。
+    # 逐键 setdefault 而不是整段替换，避免覆盖用户已有的设置。
+    if not isinstance(cfg.get("update"), dict):
+        cfg["update"] = default_config()["update"]
+    else:
+        update = dict(cfg["update"])
+        for key, value in default_config()["update"].items():
+            update.setdefault(key, value)
+        if not isinstance(update.get("enabled"), bool):
+            update["enabled"] = True
+        cfg["update"] = update
+
     if "api" not in cfg or not isinstance(cfg.get("api"), dict):
         cfg["api"] = default_config()["api"]
     else:
@@ -253,12 +277,38 @@ def load_conversation():
 STATS = {}
 
 
+def affection_keywords(call_me, nickname):
+    """粉色数字统计的关键词集合：喜欢/爱 + 称呼 + 昵称。
+
+    「你」只是默认称呼，不再作为独立基础词——由「喜欢{call_me}」自然覆盖。
+    空的称呼/昵称跳过（避免退化成裸「喜欢」「爱」误匹配）；set 去重防止两者相同。
+    """
+    keywords = set()
+    for name in (call_me, nickname):
+        if name:
+            keywords.add(f"喜欢{name}")
+            keywords.add(f"爱{name}")
+    return keywords
+
+
+def count_affection_hits(reply, call_me="你", nickname="调查员"):
+    """统计回复中「喜欢/爱」表达的总次数（非重叠匹配，按出现次数累加）。"""
+    if not reply:
+        return 0
+    keywords = affection_keywords(call_me, nickname)
+    if not keywords:
+        return 0
+    # 最长优先，避免 "喜欢{称呼}" 与 "喜欢{昵称}" 等更短词重叠时重复计数
+    pattern = "|".join(re.escape(k) for k in sorted(keywords, key=len, reverse=True))
+    return len(re.findall(pattern, reply))
+
+
 def default_stats():
     return {
         "angry_count": 0,        # 红色：触发愤怒次数
         "launch_count": 0,       # 蓝色：启动次数
         "last_2048_score": 0,    # 橙色：最近一次2048得分
-        "like_count": 0,         # 粉色：回复中"喜欢你"出现次数
+        "like_count": 0,         # 粉色：回复中"喜欢/爱"的表达次数
     }
 
 

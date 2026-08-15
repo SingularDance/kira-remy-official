@@ -8,7 +8,10 @@ echo 正在安装必要的Python库...
 echo.
 
 python -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
-python -m pip install PyQt5 requests pyperclip pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple
+python -m pip install PyQt5 requests pyperclip winrt-Windows.Media.Control winrt-Windows.Foundation pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+py -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
+py -m pip install PyQt5 requests pyperclip winrt-Windows.Media.Control winrt-Windows.Foundation pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 echo.
 echo ========================================

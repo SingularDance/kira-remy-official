@@ -5,6 +5,6 @@ echo  Remy 桌宠 - 启动程序
 echo ========================================
 echo.
 
-D:\python\3.10.11\python.exe Remy.py
+py Remy.py
 
 pause

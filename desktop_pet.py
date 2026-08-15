@@ -56,9 +56,13 @@ import config
 from dialogs import (
     HistoryDialog, HelpDialog, SettingsDialog, MasterProfileDialog,
     NoteDialog, RPSDialog, Game2048Dialog, DiceDialog, APISettingsDialog,
-    APISetupWizard, MysteryNumberManager, WallpaperPickerDialog
+    MysteryNumberManager, WallpaperPickerDialog,
+    APISetupWizard, UpdateDialog, AboutDialog
 )
+import updater
+import version
 from thinking import (
+    GENERIC_THOUGHT,
     ThinkingController,
     apply_thinking_request,
     extract_reasoning,
@@ -72,6 +76,9 @@ from utils import (
     is_image_file,
     image_to_data_uri,
 )
+
+from music_monitor import (MEDIA_UNKNOWN, MusicMonitorThread, build_music_context,
+                           build_music_event_prompt, should_react)
 
 # 超过该像素位移才算拖拽，避免单击微抖误触发打断
 DRAG_THRESHOLD_PX = 8
@@ -142,11 +149,30 @@ class RemyDesktopPet(QWidget):
         self.clipboard_check_timer.timeout.connect(self.check_clipboard)
         self.clipboard_check_timer.start(1000)
 
+        # 更新检查状态
+        self._update_in_flight = False
+        self._pending_update = None      # (UpdateCheckResult, 是否手动触发)
+        self._latest_release = None       # 最近一次查到的新版本，供对话框使用
+        self._tray_msg_is_update = False  # 托盘通知点击时用于区分消息来源
+
         self.init_ui()
         self.init_tray()
         self.mystery_number = MysteryNumberManager(self)
 
+        #音乐监听/播放器抓取
+        self.current_music_title = ""
+        self.current_music_artist = ""
+        self.current_music_type = MEDIA_UNKNOWN
+        self.music_thread = MusicMonitorThread()
+        self.music_thread.music_changed.connect(self.on_music_changed)
+        self.music_thread.music_stable.connect(self.on_music_stable)
+        self.music_thread.start()
+        self.last_music_react_time = 0  # 音乐切换互动防抖时间戳
+
         QTimer.singleShot(500, self.show_welcome)
+        # 延迟 3 秒再查更新：让启动路径先跑完（欢迎语、API 配置引导），
+        # 避免更新气泡和欢迎语抢同一个气泡位。
+        QTimer.singleShot(3000, self.start_update_check)
         self.setMinimumSize(200, 250)
 
     def show_welcome(self):
@@ -195,7 +221,10 @@ class RemyDesktopPet(QWidget):
 
         main_layout.addWidget(self.bubble_label)
 
-        input_layout = QHBoxLayout()
+        # 输入区容器：包裹输入框+发送键，整体淡入淡出，让位给气泡
+        self.input_container = QWidget()
+        self.input_container.setAttribute(Qt.WA_TranslucentBackground)  # 空时透明不露底
+        input_layout = QHBoxLayout(self.input_container)
         input_layout.setContentsMargins(5, 5, 5, 5)
 
         self.input_box = QLineEdit()
@@ -242,7 +271,13 @@ class RemyDesktopPet(QWidget):
         """)
         input_layout.addWidget(send_btn)
 
-        main_layout.addLayout(input_layout)
+        # 输入区整体淡入淡出效果
+        self.input_opacity = QGraphicsOpacityEffect()
+        self.input_container.setGraphicsEffect(self.input_opacity)
+        self.input_opacity.setOpacity(1.0)
+        self._input_fade_anim = None  # 动画引用，防止被GC回收
+
+        main_layout.addWidget(self.input_container)
         self.setLayout(main_layout)
 
         self.thinking.bind_avatar(self.avatar_label)
@@ -355,6 +390,9 @@ class RemyDesktopPet(QWidget):
 
         # 双击托盘图标显示/隐藏窗口
         self.tray_icon.activated.connect(self.on_tray_activated)
+        # 点击托盘通知打开更新详情。messageClicked 对所有托盘通知都会触发，
+        # 所以要靠 _tray_msg_is_update 区分来源。
+        self.tray_icon.messageClicked.connect(self.on_tray_message_clicked)
 
         self.tray_icon.show()
 
@@ -375,6 +413,8 @@ class RemyDesktopPet(QWidget):
 
     def quit_app(self):
         """完全退出程序"""
+        if hasattr(self, 'music_thread'):
+            self.music_thread.stop()
         self.thinking.hide()
         config.save_conversation()
         config.save_stats()
@@ -672,6 +712,9 @@ class RemyDesktopPet(QWidget):
         else:
             self.bubble_label.setText("")
 
+        # 气泡优先：先淡出输入框+发送键，让出脚底位置
+        self.fade_out_input()
+
         self.bubble_label.show()
         # 停止之前的动画，防止冲突
         if self._fade_anim is not None:
@@ -682,6 +725,7 @@ class RemyDesktopPet(QWidget):
         self._fade_anim.setStartValue(0.0)
         self._fade_anim.setEndValue(1.0)
         self._fade_anim.start()
+        self._resize_to_content()  # 气泡与输入框短暂共存，先撑开窗口避免裁切
 
         self.type_text = text
         self.type_index = 1
@@ -707,6 +751,7 @@ class RemyDesktopPet(QWidget):
         if self.type_index < len(self.type_text):
             self.bubble_label.setText(self.type_text[:self.type_index + 1])
             self.type_index += 1
+            self._resize_to_content()
         else:
             self.type_timer.stop()
             self.is_typing = False
@@ -725,6 +770,7 @@ class RemyDesktopPet(QWidget):
         if self.is_typing:
             self.type_timer.stop()
             self.bubble_label.setText(self.type_text)
+            self._resize_to_content()
             self.is_typing = False
             if self.is_speaking:
                 if self.fade_timer.isActive():
@@ -803,6 +849,50 @@ class RemyDesktopPet(QWidget):
         self.is_drag_releasing = False  # 解除拖拽保护
         if not self.message_queue:
             self.is_processing_message = False
+        self._resize_to_content()
+        # 整段对话结束后才把输入框淡回来：用户消息气泡先淡出时 API 仍在跑，
+        # 此时 _api_in_flight 为 True，输入框保持隐藏，等回复气泡淡出再回来。
+        if not self._api_in_flight and not self._pending_reply and not self.message_queue:
+            self.fade_in_input()
+
+    def fade_out_input(self):
+        """淡出输入框+发送键，给气泡让位。"""
+        if not self.input_container.isVisible():
+            return
+        if self._input_fade_anim is not None:
+            self._input_fade_anim.stop()
+        self._input_fade_anim = QPropertyAnimation(self.input_opacity, b"opacity")
+        self._input_fade_anim.setDuration(300)
+        self._input_fade_anim.setStartValue(1.0)
+        self._input_fade_anim.setEndValue(0.0)
+        self._input_fade_anim.finished.connect(self._on_input_fade_out_finished)
+        self._input_fade_anim.start()
+
+    def _on_input_fade_out_finished(self):
+        self.input_container.hide()
+        self._resize_to_content()
+
+    def fade_in_input(self):
+        """气泡淡出后把输入框+发送键淡回来。"""
+        if self.input_container.isVisible() and self.input_opacity.opacity() >= 1.0:
+            return
+        if self._input_fade_anim is not None:
+            self._input_fade_anim.stop()
+        self.input_container.show()
+        self._resize_to_content()
+        self._input_fade_anim = QPropertyAnimation(self.input_opacity, b"opacity")
+        self._input_fade_anim.setDuration(300)
+        self._input_fade_anim.setStartValue(0.0)
+        self._input_fade_anim.setEndValue(1.0)
+        self._input_fade_anim.start()
+
+    def _resize_to_content(self):
+        """按当前内容 sizeHint 收紧窗口，跟随气泡/输入框的显示隐藏变化。"""
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()
+        hint = self.sizeHint()
+        self.resize(max(200, hint.width()), max(250, hint.height()))
 
     def send_message(self):
         user_input = self.input_box.text().strip()
@@ -877,6 +967,10 @@ class RemyDesktopPet(QWidget):
             if extra_content:
                 messages.append({"role": "user", "content": extra_content})
 
+            # 音乐感知上下文
+            music_ctx = build_music_context(self.current_music_title, self.current_music_artist, self.current_music_type)
+            if music_ctx:
+                messages.append({"role": "system", "content": music_ctx})
             api_cfg = config.CONFIG.get("api", {})
             thinking_enabled = api_cfg.get("thinking_enabled") is True
 
@@ -928,7 +1022,7 @@ class RemyDesktopPet(QWidget):
                         self,
                         "show_thinking_bubble",
                         Qt.QueuedConnection,
-                        Q_ARG(str, "大脑在快速思考中..."),
+                        Q_ARG(str, GENERIC_THOUGHT),
                         Q_ARG(int, request_id),
                     )
                 else:
@@ -1114,7 +1208,7 @@ class RemyDesktopPet(QWidget):
         self._api_in_flight = True
         self._process_start_time = time.time()
 
-        self.show_typed_message("📷 [图片]", is_user=True)
+        self.show_typed_message("蕾咪正在识别[图片]~", is_user=True)
 
         config.CONVERSATION_HISTORY.append({
             "time": config.get_timestamp(),
@@ -1235,8 +1329,12 @@ class RemyDesktopPet(QWidget):
             reply = self._prepare_reply_text(reply, used_fallback)
             reasoning = normalize_reasoning(reasoning)
 
-            # 统计"喜欢你"出现次数（精确匹配这三个字）
-            like_hits = reply.count("喜欢你")
+            # 统计"喜欢/爱"的表达次数（喜欢/爱 + 称呼 + 昵称）
+            like_hits = config.count_affection_hits(
+                reply,
+                config.CONFIG.get("call_me", "你"),
+                config.CONFIG.get("nickname", "调查员"),
+            )
             if like_hits:
                 config.increment_stat("like_count", like_hits)
 
@@ -1372,6 +1470,8 @@ class RemyDesktopPet(QWidget):
         menu.addSeparator()
         menu.addAction("📜 历史记录").triggered.connect(self.open_history)
         menu.addAction("📖 帮助/说明").triggered.connect(self.open_help)
+        menu.addAction("ℹ️ 关于").triggered.connect(self.open_about)
+        menu.addAction("🔄 检查更新").triggered.connect(self.check_update_manually)
         menu.addAction("⚙️ 核心设定").triggered.connect(self.open_settings)
         menu.addAction("🔑 API 设置").triggered.connect(self.open_api_settings)
         menu.addAction("👤 调查员档案").triggered.connect(self.open_master_profile)
@@ -1418,6 +1518,10 @@ class RemyDesktopPet(QWidget):
 
     def open_help(self):
         dialog = HelpDialog(self)
+        dialog.exec_()
+
+    def open_about(self):
+        dialog = AboutDialog(self)
         dialog.exec_()
 
     def open_settings(self):
@@ -1494,6 +1598,107 @@ class RemyDesktopPet(QWidget):
         except Exception:
             self.show_typed_message("⚠️ 蕾咪打开失败", is_user=False)
 
+    # ============================================================
+    #  版本更新
+    # ============================================================
+
+    def start_update_check(self, force=False):
+        """发起更新检查。
+
+        必须放后台线程：GitHub 在国内常常要等到超时，放主线程会把界面冻住。
+        force=True 表示用户从右键菜单手动触发，此时忽略节流与跳过设置。
+        """
+        if self._update_in_flight:
+            if force:
+                self.show_typed_message("蕾咪正在查呢，等一下啦", is_user=False)
+            return
+        self._update_in_flight = True
+        threading.Thread(target=self._update_check_worker,
+                         args=(force,), daemon=True).start()
+
+    def _update_check_worker(self, force):
+        """后台线程：查版本。绝不在这里碰任何控件。"""
+        result = None
+        try:
+            cfg = updater.UpdateConfig.from_dict(config.CONFIG.get("update"))
+            result = updater.check_for_update(
+                version.VERSION, cfg, time.time(), force=force)
+        except Exception as exc:
+            # 更新检查是增强功能，任何意外都不该影响桌宠运行
+            print(f"[Remy Debug] 更新检查异常：{type(exc).__name__}: {exc}")
+
+        self._pending_update = (result, force)
+        QMetaObject.invokeMethod(self, "_on_update_checked", Qt.QueuedConnection)
+
+    @pyqtSlot()
+    def _on_update_checked(self):
+        """主线程：处理检查结果。"""
+        pending, self._pending_update = self._pending_update, None
+        self._update_in_flight = False
+        if pending is None:
+            return
+        result, force = pending
+
+        if result is None:
+            if force:
+                self.show_typed_message("哼，连不上，等下再试啦", is_user=False)
+            return
+
+        # 只有真发过请求才写回日期。被节流/被禁用时刷新日期会导致永远查不到更新。
+        if result.attempted_network:
+            config.CONFIG.setdefault("update", {})["last_check_date"] = \
+                updater.today_str(time.time())
+            try:
+                config.save_config()
+            except OSError as exc:
+                print(f"[Remy Debug] 写回更新检查日期失败：{exc}")
+
+        if result.should_notify:
+            self._latest_release = result.release
+            self.show_typed_message(updater.bubble_phrase(), is_user=False,
+                                    override_avatar="Remy_Expect.png")
+            title, body = updater.tray_message(result.release)
+            self._tray_msg_is_update = True
+            self.tray_icon.showMessage(title, body,
+                                       QSystemTrayIcon.Information, 5000)
+            return
+
+        # 手动触发时必须给反馈，否则用户以为点了没反应
+        if force:
+            if result.status is updater.UpdateStatus.UP_TO_DATE:
+                self.show_typed_message("哼，蕾咪已经是最新的了", is_user=False)
+            else:
+                self.show_typed_message("没查到新版本呢", is_user=False)
+
+    def on_tray_message_clicked(self):
+        """点击托盘通知。只有更新通知才打开更新对话框。"""
+        if self._tray_msg_is_update:
+            self._tray_msg_is_update = False
+            self.open_update_dialog()
+
+    def check_update_manually(self):
+        """右键菜单入口：已经查到过就直接开对话框，否则重新查一次。"""
+        if self._latest_release is not None:
+            self.open_update_dialog()
+        else:
+            self.start_update_check(force=True)
+
+    def open_update_dialog(self):
+        if self._latest_release is None:
+            self.start_update_check(force=True)
+            return
+        dialog = UpdateDialog(self._latest_release, self)
+        dialog.exec_()
+        # 用户点了「立即安装并重启」：.bat 已在后台分离启动并等待旧程序退出，
+        # 这里直接走完整退出流程（保存会话/统计 → 退托盘 → QApplication.quit）
+        if dialog.install_pending:
+            self.quit_app()
+            return
+        # 用户可能在对话框里点了「跳过此版本」，配置已改，清掉缓存的结果
+        skipped = config.CONFIG.get("update", {}).get("skip_version", "")
+        if skipped and skipped == self._latest_release.version:
+            self._latest_release = None
+
     def closeEvent(self, event):
         """关闭窗口时隐藏到系统托盘，而不是退出程序"""
         self.thinking.hide()
@@ -1505,3 +1710,43 @@ class RemyDesktopPet(QWidget):
             2000
         )
         event.ignore()
+
+    @pyqtSlot(str, str, int)
+    def on_music_changed(self, title, artist, media_type):
+        # 切歌/停止时立即更新标题与类型，供聊天背景注入（build_music_context）即时反映
+        self.current_music_title = title
+        self.current_music_artist = artist
+        self.current_music_type = media_type
+
+    @pyqtSlot(str, str, int)
+    def on_music_stable(self, title, artist, media_type):
+        # 媒体稳定播放满 MUSIC_STABLE_SECONDS 后才走到这里：切歌防抖 + 空闲判定
+        now = time.time()
+        busy = self.is_speaking or self.is_typing or self._api_in_flight
+        if not should_react(title, now, self.last_music_react_time, busy):
+            return
+        self.last_music_react_time = now
+
+        # 唤醒蕾咪（如果处于睡眠状态）
+        if self.is_sleeping:
+            self.wake_up()
+
+        # 更新请求序列，锁定输入（进入 API 调用流程）
+        self._request_seq += 1
+        request_id = self._request_seq
+        self._api_in_flight = True
+        self.input_box.setEnabled(False)
+
+        # 先在本地秒切一个小表情或气泡，表示她“竖起耳朵听到了”
+        self.show_typed_message("🎬...", is_user=False, skip_wake=True)
+
+        # 构造“隐形提示词”，让 API 根据歌名进行角色扮演反馈
+        music_event_prompt = build_music_event_prompt(title, artist, media_type)
+
+        # 启动后台线程调用 API
+        # 注意：传入的 user_input 为空字符串 ""，这样在成功返回前，界面上不会新增用户的聊天气泡
+        threading.Thread(
+            target=self.call_api,
+            args=("", request_id, music_event_prompt),
+            daemon=True,
+        ).start()
