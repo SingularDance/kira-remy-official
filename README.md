@@ -26,7 +26,7 @@
 
 - 用 AI 陪你聊天（DeepSeek / 通义千问）
 - 根据心情切换表情——开心、生气、委屈、期待，无聊久了还会睡着
-- 一起玩 2048、猜拳、掷骰子
+- 一起玩 2048、猜拳、掷骰子、海战棋（6x6 碰到就死 + 2x2 雷达/齐射道具，LLM 解说 + 决策，蕾咪亲自指挥舰队；无 Key 时回退本地 AI，照样能玩）
 - 帮你记笔记、开程序、开书签
 - 记住你们的对话，也记得你是谁
 
@@ -83,11 +83,12 @@ kira-remy-official/
 │   ├── master_profile.py    # 调查员档案
 │   ├── note.py              # 笔记
 │   ├── api_settings.py      # API 设置
-│   └── games/               # 🎮 小游戏（各自独立）
+│   └── games/               # 🎮 小游戏
 │       ├── __init__.py
 │       ├── rps.py           # 猜拳
 │       ├── game_2048.py     # 2048
-│       └── dice.py          # 掷骰子
+│       ├── dice.py          # 掷骰子
+│       └── battleship.py    # 海战棋（LLM 解说 + 开炮决策，无 Key 时回退本地 AI）
 │
 ├── config.example.json      # 配置模板（提交到仓库）
 ├── config.json              # 你的本地配置（含密钥，勿提交）
