@@ -17,7 +17,7 @@ class MasterProfileDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("👤 调查员档案")
         self.setGeometry(200, 200, 400, 350)
-        self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: Microsoft YaHei;")
+        self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;")
         self.init_ui()
 
     def init_ui(self):

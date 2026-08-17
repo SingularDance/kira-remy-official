@@ -1,13 +1,31 @@
 # -*- coding: utf-8 -*-
+"""听歌监听。
+
+Windows 走 SMTC（`winrt`），系统级接口，一次拿到所有播放器。
+macOS 没有可用的对应物（MediaRemote 被苹果加了权限门），只能逐个应用问，
+实现在 `music_mac.py`，那个文件顶部有完整的实测记录。
+
+两条分支发出的信号完全一样，`desktop_pet.py` 不需要知道自己在哪个平台上。
+"""
 import asyncio
+import sys
 import time
+
 from PyQt5.QtCore import QThread, pyqtSignal
 
-try:
-    from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
-    WINRT_AVAILABLE = True
-except ImportError:
+IS_MAC = sys.platform == "darwin"
+
+# mac 上不能 import winrt，所以这里要先分platform。
+# Windows 分支保持原样：winrt 装没装都不该让程序起不来
+if IS_MAC:
+    import music_mac
     WINRT_AVAILABLE = False
+else:
+    try:
+        from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
+        WINRT_AVAILABLE = True
+    except ImportError:
+        WINRT_AVAILABLE = False
 
 # ============================================================
 # 纯逻辑：提示词拼装 + 防抖判定 + 稳定计时
@@ -32,6 +50,16 @@ MEDIA_IMAGE = 3
 # 轮询参数：每 2 秒问一次 Windows，拆成 10 × 0.2s 分段 sleep 以便 stop() 快速退出
 POLL_SLICES = 10
 POLL_SLICE_SECONDS = 0.2
+
+# macOS 专用的轮询片数。**上面那两个常量是 Windows 分支在用的，不动。**
+#
+# 为什么 mac 不能跟 Windows 用同一个间隔：
+#   Windows 的 SMTC 是内存里的系统接口，查一次几毫秒，2 秒毫无压力。
+#   macOS 每轮要起 osascript 子进程去问浏览器，实测约 0.28 秒——
+#   还按 2 秒轮，这个线程有 14% 的时间在 fork 子进程，
+#   笔记本的电池和风扇都不好受。歌一首三四分钟，5 秒的延迟没人察觉。
+# 25 × 0.2s = 5 秒
+MAC_POLL_SLICES = 25
 
 
 def build_music_context(title, artist, media_type=MEDIA_UNKNOWN):
@@ -123,6 +151,11 @@ class MusicMonitorThread(QThread):
         self.tracker = MusicStabilityTracker()
 
     def run(self):
+        # macOS 走另一条分支，下面的 winrt / asyncio 那套在 mac 上都用不上
+        if IS_MAC:
+            self._run_mac()
+            return
+
         if not WINRT_AVAILABLE:
             print("[Remy Debug] winrt 未安装，音乐监听功能已禁用。")
             return
@@ -177,6 +210,49 @@ class MusicMonitorThread(QThread):
                 if not self.running:
                     break
                 await asyncio.sleep(POLL_SLICE_SECONDS)
+
+    # ------------------------------------------------------------
+    # macOS 分支
+    #
+    # 和上面的 monitor() 平行，互不影响。这里是同步实现，
+    # 不需要 asyncio——osascript 是子进程调用，用不上事件循环
+    # ------------------------------------------------------------
+
+    def _run_mac(self):
+        # 结构与 monitor() 一一对应：先发变化信号更新聊天背景，
+        # 再走同一个 MusicStabilityTracker 决定要不要主动开口。
+        #
+        # media_type 恒为 MEDIA_UNKNOWN：那是 SMTC 的
+        # Windows.Media.MediaPlaybackType，macOS 这边没有对等物——
+        # AppleScript 只给歌名歌手，浏览器只给标签标题，都不带媒体类型。
+        # 报 UNKNOWN 而不是猜一个 MUSIC，是因为猜错的代价很实在：
+        # 用户在看 B 站教程，蕾咪却按「音乐」的话术说「这旋律不错」。
+        # UNKNOWN 会落到 build_music_event_prompt 的通用分支，措辞不预设是歌。
+        while self.running:
+            try:
+                title, artist = music_mac.now_playing()
+                now = time.time()
+
+                if (title, artist) != self.current_music:
+                    self.current_music = (title, artist)
+                    self.music_changed.emit(title, artist, MEDIA_UNKNOWN)
+
+                # 稳定计时：同一内容连续放满 MUSIC_STABLE_SECONDS 才主动开口。
+                # 这一层同时解决了「开机就冒气泡」——启动时正在放的东西
+                # 也要先满 30 秒，而不是第一次轮询就触发
+                stable = self.tracker.update(title, artist, now)
+                if stable is not None:
+                    self.music_stable.emit(stable[0], stable[1], MEDIA_UNKNOWN)
+
+            except Exception as e:
+                print(f"[Remy Debug] 音乐监听器异常: {e}")
+
+            # 每 5 秒轮询一次。同样细分 sleep 以便快速响应 stop()，
+            # 但用 QThread.msleep 而不是 asyncio.sleep——这条分支没有事件循环
+            for _ in range(MAC_POLL_SLICES):
+                if not self.running:
+                    break
+                self.msleep(int(POLL_SLICE_SECONDS * 1000))
 
     def stop(self):
         """安全停止线程"""

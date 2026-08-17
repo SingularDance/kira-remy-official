@@ -7,13 +7,20 @@ Remy 桌宠 - 壁纸选择器弹窗
 
 import os
 import random
+import sys
 import webbrowser
-import winreg
+
+# Windows 独占。非 Windows 平台下 winreg 为 None，
+# 唯一使用它的 _read_current_wallpaper 已有 except Exception 兜底，会返回 ""。
+if sys.platform == "win32":
+    import winreg
+else:
+    winreg = None
 
 from PyQt5.QtWidgets import (
     QDialog, QLabel, QVBoxLayout, QHBoxLayout,
     QPushButton, QScrollArea, QWidget, QGridLayout,
-    QFileDialog, QMenu
+    QFileDialog, QMenu, QMessageBox
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPixmap, QIcon
@@ -40,9 +47,9 @@ class WallpaperPickerDialog(QDialog):
                 border-radius: 12px;
                 border: 1px solid #DAAD69;
             }
-            QLabel { color: #333333; font-family: Microsoft YaHei; }
+            QLabel { color: #333333; font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif; }
             QPushButton {
-                font-family: Microsoft YaHei;
+                font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
                 border-radius: 5px;
                 padding: 8px 16px;
             }
@@ -112,7 +119,7 @@ class WallpaperPickerDialog(QDialog):
                 border: 1px solid #333333;
                 border-radius: 6px;
                 padding: 4px;
-                font-family: Microsoft YaHei;
+                font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
             }
             QMenu::item {
                 padding: 8px 20px;
@@ -247,6 +254,18 @@ class WallpaperPickerDialog(QDialog):
 
     def _on_thumbnail_clicked(self, path):
         """点击缩略图 → 切换壁纸 + 更新高亮 + 触发桌宠表情。"""
+        # 切换壁纸目前只在 Windows 上实现（ctypes + winreg）。
+        # 不先拦住的话，下面的 set_wallpaper 会抛 RuntimeError，
+        # 被兜底的 `except Exception: pass` 吞掉——**用户点了没反应，
+        # 也没有任何提示**，只会以为程序坏了。宁可明说不支持
+        if not wallpaper_utils.IS_WINDOWS:
+            QMessageBox.information(
+                self, "暂不支持",
+                "切换壁纸目前只在 Windows 上可用。\n\n"
+                "macOS 从 26 起把壁纸设置迁到了新的系统组件，"
+                "旧的脚本接口已经失效，还没有做适配。\n"
+                "其余功能（聊天、表情、小游戏、听歌识别）在 macOS 上都正常。")
+            return
         try:
             try:
                 wallpaper_utils.set_wallpaper_style_fill()

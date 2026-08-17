@@ -27,6 +27,8 @@ import logging
 import os
 import re
 import shutil
+import sys
+import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Optional
@@ -73,6 +75,22 @@ class ExtractResult:
 # ============================================================
 # 下载
 # ============================================================
+
+def download_dir(platform: Optional[str] = None) -> str:
+    """安装包下载到哪个目录。
+
+    macOS 上 ``tempfile.gettempdir()`` 返回 ``/var/folders/…/T/`` 这种
+    随机字符的临时目录，用户根本找不到下载的包。改用系统的「下载」目录
+    （~/Downloads），Finder 里一眼就能看到。Windows / Linux 保持临时目录。
+
+    platform 参数可注入，便于在 Windows 上直接单测 mac 分支（与
+    updater.asset_template 同一套手法）。
+    """
+    plat = platform or sys.platform
+    if plat == "darwin":
+        return os.path.expanduser("~/Downloads")
+    return tempfile.gettempdir()
+
 
 def download(url: str,
              dest: str,

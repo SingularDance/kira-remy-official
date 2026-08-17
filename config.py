@@ -12,7 +12,7 @@ import json
 import re
 from datetime import datetime
 
-from utils import resource_path
+from utils import resource_path, user_data_path
 
 # ============================================================
 # 【API 供应商配置表】-  OpenAI 兼容供应商
@@ -159,13 +159,13 @@ def sanitize_config(cfg):
 def save_config():
     """把当前 CONFIG 写回 config.json（不含说明字段）。"""
     data = sanitize_config(CONFIG)
-    with open("config.json", "w", encoding="utf-8") as f:
+    with open(user_data_path("config.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def load_config():
     global CONFIG
-    config_path = "config.json"
+    config_path = user_data_path("config.json")
     example_path = resource_path("config.example.json")
 
     if os.path.exists(config_path):
@@ -183,7 +183,7 @@ def load_config():
 
 def load_shortcuts():
     global SHORTCUTS
-    shortcuts_path = "shortcuts.json"
+    shortcuts_path = user_data_path("shortcuts.json")
     if os.path.exists(shortcuts_path):
         with open(shortcuts_path, "r", encoding="utf-8") as f:
             SHORTCUTS = json.load(f)
@@ -203,7 +203,7 @@ def load_shortcuts():
 
 def load_notes():
     global NOTES
-    notes_path = "notes.txt"
+    notes_path = user_data_path("notes.txt")
     if os.path.exists(notes_path):
         with open(notes_path, "r", encoding="utf-8") as f:
             NOTES = [line.strip() for line in f.readlines() if line.strip()]
@@ -212,7 +212,7 @@ def load_notes():
 
 def save_note(text):
     global NOTES
-    notes_path = "notes.txt"
+    notes_path = user_data_path("notes.txt")
     with open(notes_path, "a", encoding="utf-8") as f:
         f.write(text + "\n")
     NOTES.append(text)
@@ -240,14 +240,14 @@ def get_timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def save_conversation():
-    log_path = "chat_log.txt"
+    log_path = user_data_path("chat_log.txt")
     with open(log_path, "w", encoding="utf-8") as f:
         for entry in CONVERSATION_HISTORY:
             f.write(f"[{entry['time']}] {entry['role']}: {entry['content']}\n")
 
 def load_conversation():
     global CONVERSATION_HISTORY
-    log_path = "chat_log.txt"
+    log_path = user_data_path("chat_log.txt")
     CONVERSATION_HISTORY = []
     if os.path.exists(log_path):
         with open(log_path, "r", encoding="utf-8") as f:
@@ -314,7 +314,7 @@ def default_stats():
 
 def load_stats():
     global STATS
-    stats_path = "stats.json"
+    stats_path = user_data_path("stats.json")
     if os.path.exists(stats_path):
         try:
             with open(stats_path, "r", encoding="utf-8") as f:
@@ -331,7 +331,7 @@ def load_stats():
 
 
 def save_stats():
-    with open("stats.json", "w", encoding="utf-8") as f:
+    with open(user_data_path("stats.json"), "w", encoding="utf-8") as f:
         json.dump(STATS, f, ensure_ascii=False, indent=2)
 
 

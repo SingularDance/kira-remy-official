@@ -26,6 +26,8 @@ from PyQt5.QtGui import (
 )
 from PyQt5.QtWidgets import QLabel, QTextEdit, QWidget
 
+from utils import UI_FONT_FAMILY
+
 COMPLETION_MAX_TOKENS = 2048
 NON_THINKING_MAX_TOKENS = 128
 GENERIC_THOUGHT = "蕾咪思考中……"
@@ -152,7 +154,7 @@ class ThinkingCloudBubble(QWidget):
         self._canvas_ready = False
 
         self._header = QLabel(thinking_header_text(0), self)
-        header_font = QFont("Microsoft YaHei", 8)
+        header_font = QFont(UI_FONT_FAMILY, 8)
         self._header.setFont(header_font)
         self._header.setAttribute(Qt.WA_TransparentForMouseEvents)
         self._header.setStyleSheet("""
@@ -164,7 +166,7 @@ class ThinkingCloudBubble(QWidget):
         """)
 
         self._body = QTextEdit(self)
-        body_font = QFont("Microsoft YaHei", 9)
+        body_font = QFont(UI_FONT_FAMILY, 9)
         self._body.setFont(body_font)
         self._body.setReadOnly(True)
         self._body.setAcceptRichText(False)

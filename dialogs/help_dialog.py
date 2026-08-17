@@ -19,7 +19,7 @@ class HelpDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("📖 使用说明书")
         self.setGeometry(200, 200, 620, 520)
-        self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: Microsoft YaHei;")
+        self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;")
         self.init_ui()
 
     def init_ui(self):

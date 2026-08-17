@@ -10,12 +10,14 @@ tag_name=v1.1.1，资产 Remy_v1.1.1.zip，48821272 字节。
 
 import unittest
 from datetime import datetime
+from unittest import mock
 
-from updater import (ASSET_TEMPLATE, UPDATE_PHRASES, Release, UpdateConfig,
-                     UpdateStatus, bubble_phrase, check_for_update,
-                     fetch_latest_release, fetch_via_api, fetch_via_redirect,
-                     is_newer, normalize_version, parse_api_release,
-                     parse_version, today_str, tray_message)
+from updater import (ASSET_TEMPLATE, MAC_ASSET_TEMPLATE, UPDATE_PHRASES, Release,
+                     UpdateConfig, UpdateStatus, _pick_asset, asset_template,
+                     bubble_phrase, check_for_update, fetch_latest_release,
+                     fetch_via_api, fetch_via_redirect, is_newer,
+                     normalize_version, parse_api_release, parse_version,
+                     today_str, tray_message)
 
 DAY1 = datetime(2026, 8, 13, 15, 0, 0).timestamp()
 DAY2 = DAY1 + 86400
@@ -166,6 +168,51 @@ class TestParseApiRelease(unittest.TestCase):
             dict(API_PAYLOAD["assets"][0], size="很大"),
         ])
         self.assertEqual(parse_api_release(payload, CFG).size, 0)
+
+
+class TestPlatformAsset(unittest.TestCase):
+    """按平台选资产：macOS 用 _Mac 后缀，且绝不下错成 Windows 包。"""
+
+    def test_asset_template_default_is_windows(self):
+        self.assertEqual(asset_template(), ASSET_TEMPLATE)
+
+    def test_asset_template_darwin(self):
+        self.assertEqual(asset_template("darwin"), MAC_ASSET_TEMPLATE)
+        self.assertEqual(asset_template("win32"), ASSET_TEMPLATE)
+
+    def test_parse_api_release_picks_mac_asset(self):
+        """release 同时挂了 Win/Mac 两个包，mac 上应精确挑中 _Mac。"""
+        payload = dict(API_PAYLOAD, assets=[
+            {"name": "Remy_v1.1.1.zip", "size": 1,
+             "browser_download_url": "https://example.com/Remy_v1.1.1.zip"},
+            {"name": "Remy_v1.1.1_Mac.zip", "size": 2,
+             "browser_download_url": "https://example.com/Remy_v1.1.1_Mac.zip"},
+        ])
+        with mock.patch("updater.asset_template",
+                        return_value=MAC_ASSET_TEMPLATE):
+            r = parse_api_release(payload, CFG)
+        self.assertEqual(r.asset_name, "Remy_v1.1.1_Mac.zip")
+
+    def test_mac_pick_exact(self):
+        assets = [
+            {"name": "Remy_v1.1.1.zip", "size": 1,
+             "browser_download_url": "https://example.com/Remy_v1.1.1.zip"},
+            {"name": "Remy_v1.1.1_Mac.zip", "size": 2,
+             "browser_download_url": "https://example.com/Remy_v1.1.1_Mac.zip"},
+        ]
+        with mock.patch("updater.asset_template",
+                        return_value=MAC_ASSET_TEMPLATE):
+            picked = _pick_asset(assets, "v1.1.1")
+        self.assertIsNotNone(picked)
+        self.assertEqual(picked["name"], "Remy_v1.1.1_Mac.zip")
+
+    def test_mac_does_not_fall_back_to_windows_zip(self):
+        """release 只有 Windows 包时，mac 上必须返回 None，绝不退回下错包。"""
+        assets = [{"name": "Remy_v1.1.1.zip", "size": 1,
+                   "browser_download_url": "https://example.com/Remy_v1.1.1.zip"}]
+        with mock.patch("updater.asset_template",
+                        return_value=MAC_ASSET_TEMPLATE):
+            self.assertIsNone(_pick_asset(assets, "v1.1.1"))
 
 
 class TestFetchViaApi(unittest.TestCase):

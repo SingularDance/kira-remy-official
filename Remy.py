@@ -31,16 +31,34 @@ if __name__ == "__main__":
     # ====== 禁止多开：使用共享内存检测 ======
     app = QApplication(sys.argv)
     shared_mem = QSharedMemory("RemyDesktopPet_SingleInstance")
+
+    # **先 attach 再 detach，清掉可能残留的段。**
+    #
+    # Windows 上共享内存由内核引用计数，最后一个句柄关闭就自动释放，
+    # 所以进程怎么死都不会留下东西。
+    # **macOS / Linux 不是这样**：进程被强杀（活动监视器结束进程、崩溃、
+    # 或者开发时 kill -9）之后，段会留在系统里。
+    #
+    # 于是下一次启动 attach() 会成功，程序以为「已经有一个在跑」，
+    # 弹窗然后退出——**而且此后永远起不来**，重启电脑之前都是这样。
+    # 用户看到的现象是「桌宠再也打不开了，一直说已在运行」。
+    # 这个 bug 在 macOS 上实测复现过。
+    #
+    # attach 成功后立刻 detach：如果我们是最后一个引用（说明那个段
+    # 是上次崩溃留下的），detach 会把它真正删掉，紧接着 create 就能成功。
+    # 要是真有另一个实例活着，它自己还持有那个段，create 仍然会失败——
+    # 多开照样挡得住。
     if shared_mem.attach():
-        # 已有实例在运行
+        shared_mem.detach()
+
+    if not shared_mem.create(1):
+        # 到这一步才是真的有另一个实例在跑
         QMessageBox.warning(
             None,
             "Remy 桌宠",
             "蕾咪已经在运行中啦！\n\n请查看系统托盘中的蕾咪图标"
         )
         sys.exit(0)
-    # 创建共享内存，标记当前实例
-    shared_mem.create(1)
     # ========================================
 
     app.setQuitOnLastWindowClosed(False)

@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 import random
 import re
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -51,8 +52,23 @@ DOWNLOAD_URL = ("https://github.com/{owner}/{repo}/releases/download/"
                 "{tag}/{asset}")
 RELEASES_PAGE_URL = "https://github.com/{owner}/{repo}/releases"
 
-# 资产命名模板，仅在 API 未提供资产列表时用于拼接兜底
+# 资产命名模板，仅在 API 未提供资产列表时用于拼接兜底。
+# Windows（默认）与 macOS 各一个：macOS 的包带 _Mac 后缀，避免下错平台。
 ASSET_TEMPLATE = "Remy_{tag}.zip"
+MAC_ASSET_TEMPLATE = "Remy_{tag}_Mac.zip"
+
+
+def asset_template(platform: Optional[str] = None) -> str:
+    """当前平台该下载哪个资产模板。
+
+    macOS 用 _Mac 后缀，与 Windows 的 Remy_{tag}.zip 区分；其余平台用默认。
+    版本号永远由 tag 动态拼接，绝不硬编码具体版本。
+
+    platform 参数可注入，便于在 Windows 上直接单测 mac 分支。
+    """
+    plat = platform or sys.platform
+    return MAC_ASSET_TEMPLATE if plat == "darwin" else ASSET_TEMPLATE
+
 
 # 检查更新的超时。启动路径上的请求宁可放弃，也不能让用户干等。
 # 注意：**下载安装包用的是另一套超时**（见 downloader.py），别混用。
@@ -216,7 +232,7 @@ def parse_api_release(raw: object, cfg: UpdateConfig) -> Optional[Release]:
     if not download_url.startswith("https://"):
         # 拿不到资产（release 未挂附件）或地址不可信时，用命名模板兜底。
         # 这条路是脆的：zip 一改名就 404，所以只在无法可依时才走。
-        asset_name = ASSET_TEMPLATE.format(tag=tag)
+        asset_name = asset_template().format(tag=tag)
         download_url = cfg.url(DOWNLOAD_URL, tag=tag, asset=asset_name)
         size = 0
         logger.info("release 未提供可用资产，改用命名模板拼接：%s", download_url)
@@ -239,13 +255,18 @@ def _pick_asset(assets: list, tag: str) -> Optional[dict]:
     优先精确匹配命名模板，其次任意 .zip。不用「第一个资产」——
     release 里常常还挂着源码包、校验文件之类的东西。
     """
-    wanted = ASSET_TEMPLATE.format(tag=tag).lower()
+    template = asset_template()
+    wanted = template.format(tag=tag).lower()
     zips = [a for a in assets
             if isinstance(a, dict) and str(a.get("name", "")).lower().endswith(".zip")]
     for a in zips:
         if str(a.get("name", "")).lower() == wanted:
             return a
-    return zips[0] if zips else None
+    # 找不到精确匹配时：仅 Windows 通用模板允许退回任意 zip（兼容历史
+    # release 里 zip 改名的情况）；macOS 的 _Mac 模板绝不下错成 Windows 包。
+    if template == ASSET_TEMPLATE:
+        return zips[0] if zips else None
+    return None
 
 
 def fetch_via_api(cfg: UpdateConfig, timeout: int = FETCH_TIMEOUT,
@@ -325,7 +346,7 @@ def fetch_via_redirect(cfg: UpdateConfig,
         logger.info("兜底路径解析出的 tag 不含版本号：%r", tag)
         return None
 
-    asset = ASSET_TEMPLATE.format(tag=tag)
+    asset = asset_template().format(tag=tag)
     return Release(
         version=version,
         tag=tag,

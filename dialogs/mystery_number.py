@@ -102,7 +102,7 @@ class MysteryNumberManager(QObject):
         self._number_label.setText(value_str)
         self._number_label.setStyleSheet(
             f"color: {color}; font-size: 26px; font-weight: bold;"
-            "font-family: Microsoft YaHei; background-color: transparent;"
+            "font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif; background-color: transparent;"
         )
         self._display_timer.start(4000)
         # 淡入

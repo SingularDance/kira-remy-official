@@ -3,6 +3,8 @@
 *.md text eol=lf
 *.bat text eol=crlf
 *.py text eol=lf
+*.command text eol=lf
+*.sh text eol=lf
 
 *.exe binary
 *.dll binary

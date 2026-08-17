@@ -14,7 +14,7 @@ import unittest
 import zipfile
 
 from downloader import (PROTECTED_FILES, _decode_name, download,
-                        safe_extract, verify_zip)
+                        download_dir, safe_extract, verify_zip)
 
 
 class FakeResponse:
@@ -150,6 +150,21 @@ class TestDownload(TempDirCase):
         res = download("http://x", self.path("p.zip"),
                        get=getter(FakeResponse([b"", b"abc", b""])))
         self.assertEqual(res.downloaded, 3)
+
+
+# ============================================================
+# 下载目录
+# ============================================================
+
+class TestDownloadDir(unittest.TestCase):
+
+    def test_darwin_uses_downloads_folder(self):
+        """macOS 用「下载」目录，而不是随机字符的临时目录。"""
+        self.assertEqual(download_dir("darwin"),
+                         os.path.expanduser("~/Downloads"))
+
+    def test_other_platforms_use_tempdir(self):
+        self.assertEqual(download_dir("win32"), tempfile.gettempdir())
 
 
 # ============================================================

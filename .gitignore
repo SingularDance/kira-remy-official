@@ -4,6 +4,7 @@ config.json
 chat_log.txt
 notes.txt
 stats.json
+music_history.jsonl
 
 # Python
 __pycache__/
@@ -12,6 +13,17 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.venv/
+venv/
+
+# 打包中间产物
+# .spec 由 pack.bat / pack.command 每次重新生成，提交了只会互相冲突
+*.spec
+# Remybaby.icns 由 pack.command 从 Remybaby.ico 现生成，同理不入库
+Remybaby.icns
+
+# macOS
+.DS_Store
 
 # IDE
 .vscode/

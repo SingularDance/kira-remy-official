@@ -24,7 +24,7 @@ class NoteDialog(QDialog):
                 border-radius: 15px;
                 border: 1px solid #DAAD69;
             }
-            QLabel { color: #333333; font-family: Microsoft YaHei; }
+            QLabel { color: #333333; font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif; }
             QTextEdit {
                 background-color: rgba(245, 245, 245, 230);
                 border: 1px solid #333333;

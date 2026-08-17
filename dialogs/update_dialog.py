@@ -12,7 +12,7 @@ Remy 桌宠 - 版本更新对话框
 """
 
 import os
-import tempfile
+import sys
 import threading
 import webbrowser
 
@@ -56,7 +56,7 @@ class UpdateDialog(QDialog):
                 border-radius: 15px;
                 border: 1px solid #DAAD69;
             }
-            QLabel { color: #333333; font-family: Microsoft YaHei; }
+            QLabel { color: #333333; font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif; }
             QLabel#version {
                 font-size: 15px;
                 font-weight: bold;
@@ -193,7 +193,7 @@ class UpdateDialog(QDialog):
 
     def _download_worker(self):
         """后台线程：下载 + 校验。绝不在这里碰任何控件。"""
-        dest = os.path.join(tempfile.gettempdir(),
+        dest = os.path.join(downloader.download_dir(),
                             self.release.asset_name or "Remy_update.zip")
         result = downloader.download(
             self.release.download_url,
@@ -252,19 +252,24 @@ class UpdateDialog(QDialog):
         self.update_btn.setEnabled(True)
         self.update_btn.clicked.disconnect()
 
-        if self_update.is_frozen():
-            # 打包态：一键安装并重启，不再让用户手动解压
+        if self_update.is_frozen() and sys.platform != "darwin":
+            # Windows 打包态：一键安装并重启，不再让用户手动解压。
+            # macOS 不能走这条路——self_update 生成 .bat + 调 cmd.exe，mac 上没有。
             self.update_btn.setText("🔄 立即安装并重启")
             self.update_btn.clicked.connect(self.install_and_restart)
         else:
-            # 开发态没有可替换的 exe，退回手动打开文件夹
+            # macOS / 开发态：没有可自动替换的方式，退回手动打开文件夹
             self.update_btn.setText("📂 打开所在文件夹")
             self.update_btn.clicked.connect(self.open_download_folder)
+            if sys.platform == "darwin":
+                hint = ("请退出蕾咪后，解压得到 MACPetRemy.app，"
+                        "拖进「应用程序」覆盖旧版即可。")
+            else:
+                hint = ("请退出蕾咪后，把压缩包内容解压覆盖到程序目录。\n"
+                        "注意保留你自己的 config.json（里面有 API Key）。")
             QMessageBox.information(
                 self, "下载完成",
-                f"✅ 已下载到：\n{detail}\n\n"
-                "请退出蕾咪后，把压缩包内容解压覆盖到程序目录。\n"
-                "注意保留你自己的 config.json（里面有 API Key）。")
+                f"✅ 已下载到：\n{detail}\n\n{hint}")
 
     def _restore_later_button(self):
         self.later_btn.setText("关闭")

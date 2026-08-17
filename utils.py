@@ -39,13 +39,129 @@ def image_to_data_uri(path):
 
 
 def resource_path(relative_path):
-    """获取资源绝对路径，兼容 PyInstaller --onefile 打包"""
+    """**只读**资源的绝对路径（立绘 PNG、config.example.json 等）。
+
+    兼容 PyInstaller 打包：--onefile 时资源解压在 sys._MEIPASS。
+
+    要读写用户数据请用 `user_data_path()`——打包后这个目录是不可写的。
+    """
     try:
         base_path = sys._MEIPASS
     except Exception:
         # 使用脚本所在目录作为基准路径，而非当前工作目录
         base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
+
+
+# 打包后 .app 里的应用名，用来在 macOS 上定位用户数据目录
+APP_NAME = "MACPetRemy"
+
+
+# ------------------------------------------------------------
+# 界面字体
+#
+# 原来到处写死 "Microsoft YaHei"。那个字体 **macOS 上没有**，
+# Qt 找不到就回退到默认字体，启动时还会打一条
+# 「Populating font family aliases took 110 ms」的警告——
+# 每次启动白白多花 100 毫秒去枚举字体别名。
+#
+# 样式表里用字体栈（`UI_FONT_STACK`），Windows 仍然排第一，
+# 所以 Windows 上的观感一个像素都不变；macOS 落到苹方。
+# QFont 只接受单个字族，所以另给一个按平台选的 `UI_FONT_FAMILY`。
+#
+# 遗留：macOS 上启动时仍会打一条
+# 「Populating font family aliases took ~100 ms」——
+# 因为字体栈里排第一的 Microsoft YaHei 在 mac 上不存在，Qt 要找一遍。
+# 渲染没问题（会正确落到苹方），只是白花约 100 毫秒。
+# 试过 QFont.insertSubstitution，**没用**，警告照旧，所以那段代码去掉了。
+# 真要根治得让这 18 处样式表按平台生成字体栈（即把普通字符串改成 f-string），
+# 为 100 毫秒改 18 个地方、还容易改错，暂时不值得。
+# ------------------------------------------------------------
+# 字体名用单引号：CSS 两种引号都认，而这些样式表大多写在 Python 的
+# "..." 字符串里，用双引号会直接把字符串截断成语法错误（踩过）
+UI_FONT_STACK = "'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif"
+
+if sys.platform == "darwin":
+    UI_FONT_FAMILY = "PingFang SC"
+elif sys.platform.startswith("win"):
+    UI_FONT_FAMILY = "Microsoft YaHei"
+else:
+    UI_FONT_FAMILY = "Noto Sans CJK SC"
+
+
+def user_data_dir():
+    """用户数据（config.json / 聊天记录 / 便签 / 统计）该放哪。
+
+    ## 为什么需要这个函数
+
+    原来所有地方都直接写 `open("config.json", "w")`，用的是**当前工作目录**。
+    在终端里 `python3 Remy.py` 时 CWD 是项目目录，能写，所以一直没问题。
+
+    但**双击 .app 启动时 macOS 把 CWD 设成根目录 `/`**，
+    于是 `open("config.json","w")` 变成往 `/config.json` 写，
+    而系统根分区是只读的：
+
+        OSError: [Errno 30] Read-only file system: 'config.json'
+
+    程序在 `load_config()` 里就崩了，表现是双击图标闪一下就没。
+
+    ## 三种情况分开处理
+
+    - **源码运行**（开发）：仍然放项目目录。改掉的话每次调试都要去
+      别处找 config.json，反而添乱
+    - **Windows 打包后**：放 exe 旁边。**这是现有 Windows 用户的数据位置，
+      不能动**——改了他们的 API Key、聊天记录、便签就全「丢」了
+    - **macOS 打包后**：放 `~/Library/Application Support/`。
+      .app 包内部不可写（而且签名后改动会破坏签名），这也是苹果的惯例
+    """
+    if getattr(sys, "frozen", False):
+        if sys.platform == "darwin":
+            preferred = os.path.expanduser(
+                f"~/Library/Application Support/{APP_NAME}")
+        else:
+            # Windows / Linux：可执行文件旁边，保持便携
+            preferred = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        preferred = os.path.dirname(os.path.abspath(__file__))
+
+    if _usable(preferred):
+        return preferred
+
+    # 首选位置写不了就退到用户目录。
+    #
+    # 会走到这里的情况：从只读介质启动（挂载的 DMG、只读网络盘），
+    # 或者装在没有写权限的目录里。
+    #
+    # 这一步不是可有可无的——**双击启动时没有终端**，
+    # 这里抛异常的话用户看到的就是「点了图标闪一下就没了」，
+    # 没有任何线索。宁可换个地方存，也不要静默崩掉。
+    fallback = os.path.expanduser(f"~/Library/Application Support/{APP_NAME}") \
+        if sys.platform == "darwin" \
+        else os.path.join(os.path.expanduser("~"), f".{APP_NAME}")
+    if _usable(fallback):
+        return fallback
+
+    raise RuntimeError(
+        f"找不到可写的目录存放配置：{preferred} 和 {fallback} 都写不了。"
+        "把程序放到「文稿」或「下载」这类目录再试。")
+
+
+def _usable(path):
+    """这个目录能不能建出来、能不能写。"""
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".write-probe")
+        with open(probe, "w") as f:
+            f.write("ok")
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
+
+
+def user_data_path(name):
+    """用户数据文件的绝对路径。**所有读写用户数据的地方都要走它。**"""
+    return os.path.join(user_data_dir(), name)
 
 
 def smart_truncate(text, max_chars=37):

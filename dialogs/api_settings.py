@@ -33,7 +33,7 @@ class APISettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("🔑 API 配置")
         self.setGeometry(200, 100, 550, 760)
-        self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: Microsoft YaHei;")
+        self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;")
         self.init_ui()
         self.load_current_config()
 
@@ -510,7 +510,7 @@ class APISetupWizard(QDialog):
         super().__init__(parent)
         self.setWindowTitle("🔑 API 配置向导")
         self.setGeometry(200, 200, 560, 470)
-        self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: Microsoft YaHei;")
+        self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;")
         self._step = 0
         self._init_ui()
         self._load_current()

@@ -71,6 +71,7 @@ from thinking import (
     supports_thinking,
 )
 from utils import (
+    UI_FONT_FAMILY,
     resource_path,
     smart_truncate,
     detect_emotion,
@@ -205,7 +206,7 @@ class RemyDesktopPet(QWidget):
                 border-radius: 12px;
                 padding: 10px 15px;
                 font-size: 14px;
-                font-family: Microsoft YaHei;
+                font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
                 border: 2px solid #DAAD69;
                 min-height: 30px;
                 max-width: 200px;
@@ -238,7 +239,7 @@ class RemyDesktopPet(QWidget):
                 border-radius: 15px;
                 padding: 6px 12px;
                 font-size: 12px;
-                font-family: Microsoft YaHei;
+                font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
             }
             QLineEdit:focus {
                 border: 2px solid #E0C080;
@@ -347,7 +348,7 @@ class RemyDesktopPet(QWidget):
             painter.setBrush(QBrush(QColor(218, 173, 105)))
             painter.drawEllipse(4, 4, 24, 24)
             painter.setPen(QPen(QColor(51, 51, 51)))
-            painter.setFont(QFont("Microsoft YaHei", 8))
+            painter.setFont(QFont(UI_FONT_FAMILY, 8))
             painter.drawText(QRect(0, 0, 32, 32), Qt.AlignCenter, "R")
             painter.end()
             self.tray_icon.setIcon(QIcon(pixmap))
@@ -362,7 +363,7 @@ class RemyDesktopPet(QWidget):
                 border: 1px solid #333333;
                 border-radius: 8px;
                 padding: 5px;
-                font-family: Microsoft YaHei;
+                font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
             }
             QMenu::item {
                 padding: 8px 25px;
@@ -448,7 +449,7 @@ class RemyDesktopPet(QWidget):
         painter.setBrush(QBrush(QColor(218, 173, 105)))
         painter.drawEllipse(60, 60, 80, 80)
         painter.setPen(QPen(QColor(51, 51, 51)))
-        painter.setFont(QFont("Microsoft YaHei", 20))
+        painter.setFont(QFont(UI_FONT_FAMILY, 20))
         painter.drawText(QRect(0, 0, 200, 200), Qt.AlignCenter, "Remy")
         painter.end()
         self.avatar_label.setPixmap(pixmap)
@@ -681,7 +682,7 @@ class RemyDesktopPet(QWidget):
                     border-radius: 12px;
                     padding: 10px 15px;
                     font-size: 14px;
-                    font-family: Microsoft YaHei;
+                    font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
                     border: 2px solid #555555;
                     min-height: 30px;
                     max-width: 200px;
@@ -698,7 +699,7 @@ class RemyDesktopPet(QWidget):
                     border-radius: 12px;
                     padding: 10px 15px;
                     font-size: 14px;
-                    font-family: Microsoft YaHei;
+                    font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
                     border: 2px solid #DAAD69;
                     min-height: 30px;
                     max-width: 200px;
@@ -1450,7 +1451,7 @@ class RemyDesktopPet(QWidget):
                 border: 1px solid #333333;
                 border-radius: 8px;
                 padding: 5px;
-                font-family: Microsoft YaHei;
+                font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
             }
             QMenu::item {
                 padding: 8px 25px;

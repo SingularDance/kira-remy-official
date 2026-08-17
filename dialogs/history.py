@@ -18,7 +18,7 @@ class HistoryDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("📜 历史记录")
         self.setGeometry(200, 200, 500, 400)
-        self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: Microsoft YaHei;")
+        self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;")
         self.init_ui()
         self.refresh_list()
 
