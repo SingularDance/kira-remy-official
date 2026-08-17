@@ -22,7 +22,7 @@ class MysteryNumberManager(QObject):
     CATEGORIES = {
         "red":    {"color": "#E93F3F"},   # 愤怒次数
         "blue":   {"color": "#3F58BD"},   # 启动次数
-        "mint":   {"color": "#5DE6CD"},   # 152 / 16
+        "mint":   {"color": "#5DE6CD"},   # 158 / 18
         "orange": {"color": "#F59E42"},   # 最近 2048 得分
         "violet": {"color": "#B481DD"},   # -2147483648 / -0
         "pink":   {"color": "#F26D9E"},   # "喜欢你"次数
@@ -76,7 +76,7 @@ class MysteryNumberManager(QObject):
         if key == "blue":
             return config.STATS.get("launch_count", 0)
         if key == "mint":
-            return random.choice(["152", "16"])
+            return random.choice(["158", "18"])
         if key == "orange":
             return config.STATS.get("last_2048_score", 0)
         if key == "violet":
