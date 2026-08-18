@@ -11,15 +11,7 @@ Remy 桌宠 - 壁纸选择器弹窗
 import json
 import os
 import random
-import sys
 import webbrowser
-
-# Windows 独占。非 Windows 平台下 winreg 为 None，
-# 唯一使用它的 _read_current_wallpaper 已有 except Exception 兜底，会返回 ""。
-if sys.platform == "win32":
-    import winreg
-else:
-    winreg = None
 
 from PyQt5.QtWidgets import (
     QDialog, QLabel, QVBoxLayout, QHBoxLayout,
@@ -488,15 +480,15 @@ class WallpaperPickerDialog(QDialog):
 
     def _on_thumbnail_clicked(self, path):
         """点击本地缩略图 → 切换壁纸。"""
-        if not wallpaper_utils.IS_WINDOWS:
-            self._warn_not_windows()
+        if not (wallpaper_utils.IS_WINDOWS or wallpaper_utils.IS_MAC):
+            self._warn_not_supported()
             return
         self._apply_wallpaper(path)
 
     def _on_community_clicked(self, item):
         """点击社区缩略图 → 命中缓存直接设；否则下载大图再设。"""
-        if not wallpaper_utils.IS_WINDOWS:
-            self._warn_not_windows()
+        if not (wallpaper_utils.IS_WINDOWS or wallpaper_utils.IS_MAC):
+            self._warn_not_supported()
             return
         cache_path = self._cache_path(item)
         if os.path.exists(cache_path):
@@ -554,14 +546,23 @@ class WallpaperPickerDialog(QDialog):
             except OSError:
                 pass
             wallpaper_utils.set_wallpaper(path)
-            self._current_wallpaper = os.path.normcase(os.path.abspath(path))
-            self._update_highlights()
-            self._update_community_highlights()
-            parent = self.parent()
-            if parent and hasattr(parent, "play_wallpaper_emotion"):
-                parent.play_wallpaper_emotion()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._show_wallpaper_error(exc)
+            return
+        self._current_wallpaper = os.path.normcase(os.path.abspath(path))
+        self._update_highlights()
+        self._update_community_highlights()
+        parent = self.parent()
+        if parent and hasattr(parent, "play_wallpaper_emotion"):
+            parent.play_wallpaper_emotion()
+
+    def _show_wallpaper_error(self, exc):
+        """设壁纸失败时把原因弹给用户。
+
+        macOS 上最常见的是 Automation 权限没给——那种静默失败用户只会以为
+        「点了没反应」，所以这里必须显式弹窗。
+        """
+        QMessageBox.warning(self, "切换壁纸失败", str(exc) or "切换壁纸失败")
 
     def _on_random(self):
         """随机选一张本地壁纸并切换。"""
@@ -598,13 +599,11 @@ class WallpaperPickerDialog(QDialog):
         for item, btn in self._comm_thumb_buttons:
             btn.setStyleSheet(self._thumb_btn_style(self._is_community_current(item)))
 
-    def _warn_not_windows(self):
+    def _warn_not_supported(self):
         QMessageBox.information(
             self, "暂不支持",
-            "切换壁纸目前只在 Windows 上可用。\n\n"
-            "macOS 从 26 起把壁纸设置迁到了新的系统组件，"
-            "旧的脚本接口已经失效，还没有做适配。\n"
-            "其余功能（聊天、表情、小游戏、听歌识别）在 macOS 上都正常。")
+            "切换壁纸目前只在 Windows 和 macOS 上可用，"
+            "当前平台暂未适配。\n其余功能不受影响。")
 
     # ============================================================
     #  工具
@@ -629,15 +628,8 @@ class WallpaperPickerDialog(QDialog):
 
     @staticmethod
     def _read_current_wallpaper():
-        """从注册表读取当前壁纸路径（用于高亮匹配）。"""
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                                 r"Control Panel\Desktop", 0, winreg.KEY_READ)
-            value, _ = winreg.QueryValueEx(key, "Wallpaper")
-            winreg.CloseKey(key)
-            return os.path.normcase(os.path.abspath(value))
-        except Exception:
-            return ""
+        """读取当前壁纸路径（用于高亮匹配）。跨平台逻辑在 wallpaper_utils。"""
+        return wallpaper_utils.get_current_wallpaper()
 
     @staticmethod
     def _btn_style(bg_color):

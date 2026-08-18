@@ -23,6 +23,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QMenu,
     QPushButton,
+    QShortcut,
     QSizePolicy,
     QSystemTrayIcon,
     QVBoxLayout,
@@ -43,6 +44,7 @@ from PyQt5.QtGui import (
     QFont,
     QIcon,
     QMoveEvent,
+    QKeySequence,
     QPainter,
     QPen,
     QPixmap,
@@ -80,8 +82,9 @@ from utils import (
     image_to_data_uri,
 )
 
-from music_monitor import (MEDIA_UNKNOWN, MusicMonitorThread, build_music_context,
-                           build_music_event_prompt, should_react)
+from music_monitor import (MEDIA_MUSIC, MEDIA_UNKNOWN, MusicMonitorThread,
+                           build_music_context, build_music_event_prompt,
+                           should_react)
 
 # 超过该像素位移才算拖拽，避免单击微抖误触发打断
 DRAG_THRESHOLD_PX = 8
@@ -253,6 +256,10 @@ class RemyDesktopPet(QWidget):
         # 回车键发送消息（已存在，但显式保留）
         self.input_box.returnPressed.connect(self.send_message)
         input_layout.addWidget(self.input_box)
+
+        # 方向键 ↑ 快速聚焦输入框（窗口获得焦点时按上键即可回到聊天输入）
+        self._focus_shortcut = QShortcut(QKeySequence(Qt.Key_Up), self)
+        self._focus_shortcut.activated.connect(lambda: self.input_box.setFocus())
 
         send_btn = QPushButton("发送")
         send_btn.clicked.connect(self.send_message)
@@ -1754,8 +1761,10 @@ class RemyDesktopPet(QWidget):
         self._api_in_flight = True
         self.input_box.setEnabled(False)
 
-        # 先在本地秒切一个小表情或气泡，表示她“竖起耳朵听到了”
-        self.show_typed_message("🎬...", is_user=False, skip_wake=True, hide_thinking=False)
+        # 先在本地秒切一个小表情或气泡，表示她“竖起耳朵听到了”。
+        # 音乐用 ♪、视频/网站里的声音用 🎬，两种来源一眼区分
+        heard_emoji = "🎵" if media_type == MEDIA_MUSIC else "🎬"
+        self.show_typed_message(f"{heard_emoji}...", is_user=False, skip_wake=True, hide_thinking=False)
 
         # 构造“隐形提示词”，让 API 根据歌名进行角色扮演反馈
         music_event_prompt = build_music_event_prompt(title, artist, media_type)
