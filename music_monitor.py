@@ -198,7 +198,7 @@ class MusicMonitorThread(QThread):
                     # 没有音乐在播放
                     if self.current_music != ("", ""):
                         self.current_music = ("", "")
-                        self.music_changed.emit("", "")
+                        self.music_changed.emit("", "", MEDIA_UNKNOWN)
                     # 重置稳定计时，避免暂停/停止后残留旧 pending
                     self.tracker.update("", "", now)
 

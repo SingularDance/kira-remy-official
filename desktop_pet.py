@@ -132,6 +132,7 @@ class RemyDesktopPet(QWidget):
         self._process_start_time = 0  # 用于防御性超时检测
         self._pending_reply = ""
         self._fade_hides_thinking = False
+        self._hide_thinking_on_finish = True
         self._api_in_flight = False
         self._request_seq = 0
         self._current_avatar = "Remy_Shut.png"
@@ -641,10 +642,11 @@ class RemyDesktopPet(QWidget):
             self.last_interaction_time = time.time()
             self.show_typed_message("嗯...？你找我吗？", is_user=False)
 
-    def show_typed_message(self, text, is_user=False, override_avatar=None, skip_wake=False):
+    def show_typed_message(self, text, is_user=False, override_avatar=None, skip_wake=False, hide_thinking=True):
         """显示打字机效果的消息 - 支持消息队列和情绪检测
         override_avatar 不为 None 时，使用指定头像并跳过情绪检测
-        skip_wake 为 True 时，睡眠状态下不唤醒（用于睡眠提示消息自身）"""
+        skip_wake 为 True 时，睡眠状态下不唤醒（用于睡眠提示消息自身）
+        hide_thinking 为 False 时，气泡淡出不隐藏思考气泡（用于识歌等先于思考的提示）"""
         # 如果正在处理消息，加入队列
         if self.is_processing_message:
             self.message_queue.append((text, is_user))
@@ -656,6 +658,7 @@ class RemyDesktopPet(QWidget):
 
         # 开始处理新消息
         self.is_processing_message = True
+        self._hide_thinking_on_finish = hide_thinking
 
         if self.type_timer.isActive():
             self.type_timer.stop()
@@ -801,7 +804,7 @@ class RemyDesktopPet(QWidget):
         if self.fade_timer.isActive():
             self.fade_timer.stop()
         # 延迟后淡出气泡（同时还原头像）；与思考气泡一起隐藏
-        self._fade_hides_thinking = True
+        self._fade_hides_thinking = self._hide_thinking_on_finish
         self.fade_timer.singleShot(2000, self.fade_out_bubble)
 
         self.process_next_message()
@@ -1235,6 +1238,8 @@ class RemyDesktopPet(QWidget):
             persona_msg = (
                 f"（调查员给蕾咪看了一张图，内容是：{description}）"
                 "请用蕾咪的语气，简单说说你看到了什么。"
+                "这是调查员分享的图片，要友善、就事论事地评价，"
+                "禁止贬低、嫌弃或吐槽图片的内容。"
             )
             self.call_api("", request_id, extra_content=persona_msg)
         except Exception as e:
@@ -1745,7 +1750,7 @@ class RemyDesktopPet(QWidget):
         self.input_box.setEnabled(False)
 
         # 先在本地秒切一个小表情或气泡，表示她“竖起耳朵听到了”
-        self.show_typed_message("🎬...", is_user=False, skip_wake=True)
+        self.show_typed_message("🎬...", is_user=False, skip_wake=True, hide_thinking=False)
 
         # 构造“隐形提示词”，让 API 根据歌名进行角色扮演反馈
         music_event_prompt = build_music_event_prompt(title, artist, media_type)
