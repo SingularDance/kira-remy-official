@@ -62,6 +62,7 @@ from dialogs import (
 )
 import updater
 import version
+import community_wallpaper
 from thinking import (
     GENERIC_THOUGHT,
     ThinkingController,
@@ -1506,6 +1507,10 @@ class RemyDesktopPet(QWidget):
             bookmark_menu.addAction(f"🌐 {bm['name']}").triggered.connect(
                 lambda checked, u=bm['url']: self.open_bookmark(u)
             )
+        bookmark_menu.addSeparator()
+        bookmark_menu.addAction("🏠 蕾咪的家").triggered.connect(
+            lambda: self.open_bookmark(community_wallpaper.BASE_URL)
+        )
 
         menu.addSeparator()
         menu.addAction("❌ 退出").triggered.connect(self.quit_app)
