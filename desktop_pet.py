@@ -1498,7 +1498,7 @@ class RemyDesktopPet(QWidget):
         game_menu.addAction("🔢 2048").triggered.connect(self.open_2048)
         game_menu.addAction("✊ 猜拳").triggered.connect(self.open_rps)
         game_menu.addAction("🎲 掷骰子").triggered.connect(self.open_dice)
-        game_menu.addAction("🛸 星海战棋").triggered.connect(self.open_battleship)
+        game_menu.addAction("🚢 海战棋").triggered.connect(self.open_battleship)
 
         menu.addAction("🖼️ 切换壁纸").triggered.connect(self.open_wallpaper_picker)
 
