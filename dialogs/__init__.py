@@ -14,6 +14,7 @@ from dialogs.games.rps import RPSDialog
 from dialogs.games.game_2048 import Game2048Dialog
 from dialogs.games.dice import DiceDialog
 from dialogs.games.battleship import BattleshipDialog
+from dialogs.games.star_battleship import StarBattleshipDialog
 from dialogs.api_settings import APISettingsDialog, APISetupWizard
 from dialogs.mystery_number import MysteryNumberManager
 from dialogs.wallpaper_picker import WallpaperPickerDialog
@@ -30,6 +31,7 @@ __all__ = [
     "Game2048Dialog",
     "DiceDialog",
     "BattleshipDialog",
+    "StarBattleshipDialog",
     "APISettingsDialog",
     "APISetupWizard",
     "MysteryNumberManager",

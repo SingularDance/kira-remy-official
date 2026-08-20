@@ -9,10 +9,12 @@ from dialogs.games.rps import RPSDialog
 from dialogs.games.game_2048 import Game2048Dialog
 from dialogs.games.dice import DiceDialog
 from dialogs.games.battleship import BattleshipDialog
+from dialogs.games.star_battleship import StarBattleshipDialog
 
 __all__ = [
     "RPSDialog",
     "Game2048Dialog",
     "DiceDialog",
     "BattleshipDialog",
+    "StarBattleshipDialog",
 ]
