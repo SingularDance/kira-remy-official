@@ -27,15 +27,15 @@ from utils import resource_path
 SIZE = R.SIZE
 CELL = 30
 
-# 炮击 / 道具两大类：炮击仅普通炮击（None）；激光α/β、相位γ、扫描、齐射、相位扫描θ 均属道具
+# 炮击 / 道具两大类：炮击仅普通炮击（None）；激光α/β、齐射γ、扫描、齐射、扫描θ 均属道具
 
 ITEM_LABELS = {
     "scan": "🔍 扫描",
     "volley": "💥 齐射",
     "laser_alpha": "📏 激光α",
     "laser_beta": "📐 激光β",
-    "phase_gamma": "🌀 相位γ",
-    "phase_theta": "🔭 相位θ",
+    "phase_gamma": "🌀 齐射γ",
+    "phase_theta": "🔭 扫描θ",
 }
 
 # 蕾咪全局被动（每局随机一个，对应左侧圆形头像 + 表情）
@@ -386,6 +386,23 @@ class ShipCodexDialog(QDialog):
         return frame
 
 
+class _ItemButton(QPushButton):
+    """可悬停的道具按钮：进入/离开时回调，用于弹出范围预览示意图。"""
+
+    def __init__(self, text, hover_cb, leave_cb):
+        super().__init__(text)
+        self._hover_cb = hover_cb
+        self._leave_cb = leave_cb
+
+    def enterEvent(self, event):
+        self._hover_cb()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._leave_cb()
+        super().leaveEvent(event)
+
+
 class StarBattleshipDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -413,6 +430,8 @@ class StarBattleshipDialog(QDialog):
 
         # 舰体特性悬浮窗（悬停显示，移出淡出隐藏）
         self._init_ship_tooltip()
+        # 道具范围预览示意图（悬停道具按钮时弹出）
+        self._init_item_preview()
 
     def _init_ship_tooltip(self):
         self.ship_tip = QLabel(self)
@@ -428,6 +447,12 @@ class StarBattleshipDialog(QDialog):
         self._tip_anim = QPropertyAnimation(self.ship_tip_effect, b"opacity", self)
         self._tip_anim.setDuration(260)
         self._tip_anim.finished.connect(self._on_tip_fade_finished)
+
+    def _init_item_preview(self):
+        self.item_preview = QLabel(self)
+        self.item_preview.setStyleSheet(
+            "background-color: #FFFFFF; border: 1px solid #DAAD69; border-radius: 4px; padding: 3px;")
+        self.item_preview.hide()
 
     # ============================================================
     #  状态
@@ -578,10 +603,12 @@ class StarBattleshipDialog(QDialog):
         item_layout.addStretch()
         self.item_buttons = {}
         for key, label in ITEM_LABELS.items():
-            btn = QPushButton(label)
+            btn = _ItemButton(label,
+                              lambda k=key: self._show_item_preview(k),
+                              self._hide_item_preview)
             btn.setCheckable(True)
-            btn.setEnabled(False)
-            btn.setStyleSheet(self._item_btn_qss())
+            btn.setEnabled(True)  # 始终可悬停以弹出范围预览，可用性由样式与 _set_mode 守卫表达
+            btn.setStyleSheet(self._item_btn_qss(False))
             btn.clicked.connect(lambda checked, k=key: self._set_mode(k))
             self.item_buttons[key] = btn
             item_layout.addWidget(btn)
@@ -626,15 +653,16 @@ class StarBattleshipDialog(QDialog):
         self._sync_item_buttons()
 
     @staticmethod
-    def _item_btn_qss():
-        return """
-            QPushButton {
-                background-color: #2E6C8E; color: white; border: none;
+    def _item_btn_qss(usable=True):
+        bg = "#2E6C8E" if usable else "#9AA9B5"
+        hover = "#3E7C9E" if usable else "#9AA9B5"
+        return f"""
+            QPushButton {{
+                background-color: {bg}; color: white; border: none;
                 border-radius: 6px; padding: 7px 12px; font-size: 12px;
-            }
-            QPushButton:hover { background-color: #3E7C9E; }
-            QPushButton:checked { background-color: #DAAD69; }
-            QPushButton:disabled { background-color: #999999; }
+            }}
+            QPushButton:hover {{ background-color: {hover}; }}
+            QPushButton:checked {{ background-color: #DAAD69; }}
         """
 
     @staticmethod
@@ -999,7 +1027,8 @@ class StarBattleshipDialog(QDialog):
             count = self.player_items.get(key, 0)
             usable = can and self._items_remaining > 0 and count > 0
             btn.setText(f"{ITEM_LABELS[key]} ×{count}")
-            btn.setEnabled(usable)
+            btn.setEnabled(True)  # 保持可悬停以显示范围预览，可用性由样式表达
+            btn.setStyleSheet(self._item_btn_qss(usable))
             btn.setChecked(False)
         self.action_mode = None
         # 结束回合：本回合炮击次数用尽后才亮起
@@ -1102,6 +1131,55 @@ class StarBattleshipDialog(QDialog):
             for c in range(SIZE):
                 self.ai_cells[r][c].set_preview(False)
 
+    def _show_item_preview(self, key):
+        """悬停道具按钮时弹出该道具作用范围的小图形示意图。"""
+        pm = self._range_diagram_pixmap(key)
+        if pm.isNull():
+            self._hide_item_preview()
+            return
+        self.item_preview.setPixmap(pm)
+        self.item_preview.adjustSize()
+        pos = self.mapFromGlobal(QCursor.pos())
+        self.item_preview.move(pos.x() + 14, pos.y() - self.item_preview.height() - 10)
+        self.item_preview.show()
+        self.item_preview.raise_()
+
+    def _hide_item_preview(self):
+        if self.item_preview.isVisible():
+            self.item_preview.hide()
+
+    def _range_diagram_pixmap(self, mode):
+        """把道具作用范围画成小格子示意图（悬停预览用）。"""
+        shape = self._action_cells(mode, (0, 0))
+        if not shape:
+            return QPixmap()
+        min_r = min(p[0] for p in shape)
+        max_r = max(p[0] for p in shape)
+        min_c = min(p[1] for p in shape)
+        max_c = max(p[1] for p in shape)
+        rows = max_r - min_r + 1
+        cols = max_c - min_c + 1
+        cell = 14
+        pad = 6
+        pm = QPixmap(cols * cell + pad * 2, rows * cell + pad * 2)
+        pm.fill(QColor("#FFFFFF"))
+        painter = QPainter(pm)
+        for rr in range(rows):
+            for cc in range(cols):
+                x = pad + cc * cell
+                y = pad + rr * cell
+                painter.setBrush(QBrush(QColor("#F0F0F0")))
+                painter.setPen(QPen(QColor("#D8D8D8"), 1))
+                painter.drawRect(x + 1, y + 1, cell - 2, cell - 2)
+        for (r, c) in shape:
+            x = pad + (c - min_c) * cell
+            y = pad + (r - min_r) * cell
+            painter.setBrush(QBrush(QColor("#DAAD69")))
+            painter.setPen(QPen(QColor("#A67B2E"), 1.5))
+            painter.drawRect(x + 1, y + 1, cell - 2, cell - 2)
+        painter.end()
+        return pm
+
     # ============================================================
     #  玩家回合
     # ============================================================
@@ -1126,7 +1204,7 @@ class StarBattleshipDialog(QDialog):
             self.player_items[mode] -= 1
             self._do_scan(mode, (r, c))
         else:
-            # 激光α/β、相位γ、齐射 均属道具
+            # 激光α/β、齐射γ、齐射 均属道具
             self._items_remaining -= 1
             self.player_items[mode] -= 1
             cells = self._action_cells(mode, (r, c))
@@ -1134,7 +1212,7 @@ class StarBattleshipDialog(QDialog):
         self._after_player_action()
 
     def _do_scan(self, mode, anchor):
-        """扫描 / 相位扫描θ：标记区域内的舰影（不攻击）。"""
+        """扫描 / 扫描θ：标记区域内的舰影（不攻击）。"""
         cells = self._action_cells(mode, anchor)
         self._record_scan_effect(cells)
         found = []
@@ -1166,10 +1244,10 @@ class StarBattleshipDialog(QDialog):
             if destroyed:
                 self._remy_angry_volley += 1
                 self._broadcast("蕾咪触发【刚烈】，下回合额外齐射1次！")
-        # 指挥舰【羽翼】：存活时，通过弱点击坠敌舰 → 获得相位θ（无每回合次数限制）
+        # 指挥舰【羽翼】：存活时，通过弱点击坠敌舰 → 获得扫描θ（无每回合次数限制）
         if weak_killed and R.has_alive(self.player_ships, "command"):
             self.player_items["phase_theta"] += len(weak_killed)
-            self._broadcast(f"我方指挥舰触发【羽翼】，获得{len(weak_killed)}发[相位扫描θ]！")
+            self._broadcast(f"我方指挥舰触发【羽翼】，获得{len(weak_killed)}发[扫描θ]！")
 
     def _on_player_destroyed_ai(self, destroyed):
         for ship in destroyed:
@@ -1181,7 +1259,7 @@ class StarBattleshipDialog(QDialog):
                 self._broadcast(f"蕾咪的{ship['name']}触发【{ship['trait_name']}】，下回合1发炮击变为[激光炮击β]！")
             elif special == "phase_3x3_all":
                 self._pending_ai_specials.append("phase_3x3_all")
-                self._broadcast(f"蕾咪的{ship['name']}触发【{ship['trait_name']}】，下回合所有炮击变为[相位炮击γ]！")
+                self._broadcast(f"蕾咪的{ship['name']}触发【{ship['trait_name']}】，下回合所有炮击变为[齐射γ]！")
             if ship["type"] == "command":
                 msg = R.command_eliminate_on_destroy(self.ai_ships)
                 if msg:
@@ -1301,7 +1379,7 @@ class StarBattleshipDialog(QDialog):
             desc = f"激光炮击β（{r + 1}行一带）"
         elif kind == "phase_3x3":
             cells = R.area_3x3(target)
-            desc = f"相位炮击γ（{R.fmt(target)}一带）"
+            desc = f"齐射γ（{R.fmt(target)}一带）"
         elif kind == "volley":
             cells = R.area_2x2(target)
             buff_name = REMY_BUFFS[self._remy_buff_key]["name"]
@@ -1326,8 +1404,8 @@ class StarBattleshipDialog(QDialog):
             self._broadcast(f"我方{ship['name']}触发【{ship['trait_name']}】，获得1发[扫描]！")
         elif ship["type"] == "frigate":
             self.player_items["phase_theta"] += 1
-            self._broadcast(f"我方{ship['name']}触发【{ship['trait_name']}】，获得1发[相位扫描θ]！")
-        # 侦察梭【垂眸】：成为最后存活一类时，每艘存活侦察梭各获得相位γ+相位θ
+            self._broadcast(f"我方{ship['name']}触发【{ship['trait_name']}】，获得1发[扫描θ]！")
+        # 侦察梭【垂眸】：成为最后存活一类时，每艘存活侦察梭各获得齐射γ+扫描θ
         if (R.last_surviving_type(self.player_ships) == "scout"
                 and not self._scout_last_granted):
             self._scout_last_granted = True
@@ -1335,7 +1413,7 @@ class StarBattleshipDialog(QDialog):
                          if s["type"] == "scout" and s["alive"])
             self.player_items["phase_gamma"] += scount
             self.player_items["phase_theta"] += scount
-            self._broadcast(f"我方侦察梭触发【垂眸】，获得{scount}发[相位炮击γ]和{scount}发[相位扫描θ]！")
+            self._broadcast(f"我方侦察梭触发【垂眸】，获得{scount}发[齐射γ]和{scount}发[扫描θ]！")
 
     def _ai_pick_cell(self):
         for s in self.player_ships:

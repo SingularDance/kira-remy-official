@@ -246,9 +246,9 @@ class TestTraits(unittest.TestCase):
         self.assertIsNone(R.special_shot_on_destroy(_make_ship([(0, 0)], [(0, 0)], "scout")))
 
     def test_player_trait_texts(self):
-        # 侦察梭【垂眸】→ 唯一存活时获得相位γ+相位θ
-        self.assertIn("相位炮击γ", R.SHIP_TYPES["player"]["scout"]["trait"])
-        self.assertIn("相位扫描θ", R.SHIP_TYPES["player"]["scout"]["trait"])
+        # 侦察梭【垂眸】→ 唯一存活时获得齐射γ+扫描θ
+        self.assertIn("齐射γ", R.SHIP_TYPES["player"]["scout"]["trait"])
+        self.assertIn("扫描θ", R.SHIP_TYPES["player"]["scout"]["trait"])
         # 指挥舰【羽翼】→ 初始可使用道具次数+1
         self.assertIn("初始可使用道具次数+1", R.SHIP_TYPES["player"]["command"]["trait"])
         # AI 侦察梭【孤雀】→ 唯一存活时炮击变激光α
