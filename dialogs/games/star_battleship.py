@@ -61,8 +61,8 @@ REMY_BUFFS = {
     "composed": {
         "name": "淑均",
         "avatar": "Remy_Open.png",
-        "tagline": "清除我方舰体所有弱点",
-        "desc": "【淑均】\n清除我方舰体\n所有弱点",
+        "tagline": "清除敌方舰体所有弱点",
+        "desc": "【淑均】\n清除敌方舰体\n所有弱点",
     },
 }
 
@@ -469,11 +469,11 @@ class StarBattleshipDialog(QDialog):
         self._scan_effects = []           # 扫描动效：{cells, r0, c0, k, start}
 
         self._deploy_ai()
-        # 全局被动【淑均】：开局清除我方（蕾咪）所有舰体弱点
-        if self._remy_buff_key == "composed":
-            for s in self.ai_ships:
-                R.eliminate_weak_points(s)
         self._deploy_player()
+        # 全局被动【淑均】：开局清除敌方（玩家）所有舰体弱点
+        if self._remy_buff_key == "composed":
+            for s in self.player_ships:
+                R.eliminate_weak_points(s)
         # 换新一局时同步刷新左侧被动头像与说明
         if hasattr(self, "_remy_avatar_label"):
             self._update_remy_passive()
@@ -700,7 +700,7 @@ class StarBattleshipDialog(QDialog):
     def _build_remy_passive(self):
         """蕾咪圆形头像 + 本局全局被动说明（弹窗左侧，固定头像与文案方框位置）。"""
         widget = QWidget()
-        widget.setFixedWidth(124)
+        widget.setFixedWidth(136)
         v = QVBoxLayout(widget)
         v.setContentsMargins(6, 10, 6, 10)
         v.setSpacing(10)
@@ -713,8 +713,8 @@ class StarBattleshipDialog(QDialog):
         self._remy_desc_label = QLabel()
         self._remy_desc_label.setAlignment(Qt.AlignCenter)
         self._remy_desc_label.setWordWrap(True)
-        self._remy_desc_label.setFixedWidth(108)
-        self._remy_desc_label.setMinimumHeight(72)
+        self._remy_desc_label.setFixedWidth(124)
+        self._remy_desc_label.setMinimumHeight(88)
         self._remy_desc_label.setStyleSheet(
             "background-color: #EEF6FB; color: #2E6C8E;"
             " border: 1px solid #BBD6E8; border-radius: 6px;"
