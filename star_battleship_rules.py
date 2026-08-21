@@ -9,11 +9,11 @@
 - 10x10 棋盘，坐标 A1-J10。
 - 双方各 6 类舰体，各有固定形状与固定弱点；弱点随旋转一起转，每艘初始恰 1 个弱点。
   - 「第一格」弱点：直线/方形类舰体，弱点在 cell 列表首格。
-  - 「顶点」弱点：指挥舰（干/T）与 AI 旗舰（士）在竖直主干**底端**；玩家旗舰（十字）在上方短柄**顶端**。
+  - 「顶点」弱点：指挥舰（干/T）与旗舰（士/十字）在竖直主干的一端。
 - 部位分「弱点 / 普通」两种：命中弱点立即击毁；命中普通只累计，打光全部格子也击毁。
-- 特性可动态加弱点（弱点+N）或消除弱点；护卫舰的弱点不可被外部消除。
-- 舰队：AI 3~6 艘（必含指挥舰+旗舰）、玩家 6~9 艘（指挥舰、旗舰二选一）；
-  总格数只是上限（AI ≤33、玩家 ≤22），舰体类型在各上限内随机分配。
+- 特性可动态加弱点（弱点+N）或消除弱点（双方护卫舰都可消除自身及所接壤舰体弱点）。
+- 舰队：双方 ≥3 艘且必含指挥舰+旗舰；总格数只是上限（AI ≤35、玩家 ≤22），
+  舰体类型在各上限内随机分配；AI 额外限制护卫舰+突击舰合计 ≤2。
 """
 
 import random
@@ -26,10 +26,6 @@ NORMAL = "normal"
 
 # 四向偏移（仅用于「接壤」判定，无优先级）
 FOUR_DIRS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-
-# 护卫舰消除邻舰弱点的优先方向
-DIR_ORDER_AI = [(-1, 0), (1, 0), (0, -1), (0, 1)]      # 上 → 下 → 左 → 右
-DIR_ORDER_PLAYER = [(-1, 0), (1, 0), (0, 1), (0, -1)]  # 上 → 下 → 右 → 左
 
 # 六类舰体的统一配色（双方同 key 同色，深色系、色相分明便于区分）
 COLORS = {
@@ -50,65 +46,65 @@ COLORS = {
 # 弱点随 cells 一起旋转，保证「第一格/顶点」这类方向性弱点在旋转后仍落在正确位置。
 SHIP_DEFS = {
     "ai": [
-        {"key": "scout", "name": "侦察梭", "trait_name": "孤勇",
+        {"key": "scout", "name": "侦察梭", "trait_name": "孤雀",
          "cells": [(0, 0), (0, 1)], "weak_index": 0, "rot_k": [0, 1], "max_count": 3,
-         "trait": "孤勇：场上仅自身存活时，蕾咪下回合1发炮击变为[激光炮击α]。",
+         "trait": "孤雀：场上仅自身存活时，蕾咪下回合1发炮击变为[激光炮击α]。",
          "trait_short": "唯一存活时，炮击变为[激光α]"},
-        {"key": "frigate", "name": "护卫舰", "trait_name": "护佑",
-         "cells": [(0, 0), (0, 1), (1, 0), (1, 1)], "weak_index": 0, "rot_k": [0], "max_count": 3,
-         "trait": "护佑：自身弱点无法被消除，当自身接壤时，使自身弱点+3，并消除所接壤舰体的弱点。",
-         "trait_short": "接壤时消除邻舰弱点，自身弱点+3"},
-        {"key": "assault", "name": "突击舰", "trait_name": "藏匿",
-         "cells": [(0, 0), (0, 1), (0, 2)], "weak_index": 0, "rot_k": [0, 1], "max_count": 3,
-         "trait": "藏匿：当自身孤立时，消除自身弱点。",
-         "trait_short": "孤立时消除自身弱点"},
-        {"key": "destroyer", "name": "驱逐舰", "trait_name": "荣光",
+        {"key": "frigate", "name": "护卫舰", "trait_name": "佑鹤",
+         "cells": [(0, 0), (0, 1), (1, 0), (1, 1)], "weak_index": 0, "rot_k": [0], "max_count": 2,
+         "trait": "佑鹤：存活时，我方每回合炮击次数-1。自身接壤时，消除自身弱点。",
+         "trait_short": "存活时使玩家炮击-1；接壤消除自身弱点"},
+        {"key": "assault", "name": "突击舰", "trait_name": "匿鹰",
          "cells": [(0, 0), (0, 1), (0, 2), (0, 3)], "weak_index": 0, "rot_k": [0, 1], "max_count": 2,
-         "trait": "荣光：坠毁时，蕾咪下回合1发炮击变为[激光炮击β]。",
+         "trait": "匿鹰：存活时，我方每回合炮击次数-1。自身孤立时，消除自身弱点。",
+         "trait_short": "存活时使玩家炮击-1；孤立消除自身弱点"},
+        {"key": "destroyer", "name": "驱逐舰", "trait_name": "颂歌",
+         "cells": [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)], "weak_index": 0, "rot_k": [0, 1], "max_count": 1,
+         "trait": "颂歌：坠毁时，蕾咪下回合1发炮击变为[激光炮击β]。",
          "trait_short": "坠毁时，下回合1发炮击变[激光β]"},
-        {"key": "command", "name": "指挥舰", "trait_name": "指引",
+        {"key": "command", "name": "指挥舰", "trait_name": "星夜",
          # 干字形 9 格：顶横 3 + 中横 3 + 竖 5；弱点在竖笔底端 (4,1)
          "cells": [(0, 0), (0, 1), (0, 2), (1, 1), (2, 0), (2, 1), (2, 2), (3, 1), (4, 1)],
          "weak_index": 8, "rot_k": [0], "max_count": 1,
-         "trait": "指引：存活时，蕾咪每回合炮击次数+1。坠毁时：消除己方所有舰体的弱点。",
+         "trait": "星夜：存活时，蕾咪每回合炮击次数+1。坠毁时：消除己方所有舰体的弱点。",
          "trait_short": "存活时每回合炮击+1；坠毁消除己方弱点"},
         {"key": "flagship", "name": "旗舰", "trait_name": "流星",
-         # 士字形 11 格：顶长横 5 + 底短横 3 + 竖 5；弱点在竖笔底端 (4,2)
-         "cells": [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 2), (2, 2),
-                   (3, 1), (3, 2), (3, 3), (4, 2)],
+         # 士字形 11 格：顶短横 3 + 底长横 5 + 竖 5；弱点在竖笔底端 (4,2)
+         "cells": [(0, 1), (0, 2), (0, 3), (1, 2), (2, 2),
+                   (3, 0), (3, 1), (3, 2), (3, 3), (3, 4), (4, 2)],
          "weak_index": 10, "rot_k": [0], "max_count": 1,
          "trait": "流星：存活时，蕾咪每回合炮击次数+1。坠毁时：蕾咪下回合所有炮击变为[相位炮击γ]。",
          "trait_short": "存活时每回合炮击+1；坠毁全部炮击变[相位γ]"},
     ],
     "player": [
-        {"key": "scout", "name": "侦察梭", "trait_name": "斥候",
+        {"key": "scout", "name": "侦察梭", "trait_name": "垂眸",
          "cells": [(0, 0)], "weak_index": 0, "rot_k": [0], "max_count": 3,
-         "trait": "斥候：场上仅自身存活时，我方每回合炮击次数+1。坠毁时：我方获得1发[扫描]。",
-         "trait_short": "唯一存活时每回合炮击+1；坠毁获得[扫描]"},
-        {"key": "frigate", "name": "护卫舰", "trait_name": "防卫",
-         "cells": [(0, 0), (0, 1)], "weak_index": 0, "rot_k": [0, 1], "max_count": 3,
-         "trait": "防卫：自身弱点无法被消除，当自身与其他舰体接壤时，使自身弱点+1，并消除所接壤舰体的弱点。坠毁时：我方获得1发[扫描]。",
-         "trait_short": "接壤时消除邻舰弱点，自身弱点+1"},
-        {"key": "assault", "name": "突击舰", "trait_name": "绝命",
-         "cells": [(0, 0), (0, 1), (0, 2)], "weak_index": 0, "rot_k": [0, 1], "max_count": 3,
-         "trait": "绝命：击坠时，我方获得一发[齐射]，然后使自身弱点+1。",
+         "trait": "垂眸：场上仅自身存活时，我方获得1发[相位炮击γ]和1发[相位扫描θ]。坠毁时：我方获得1发[扫描]。",
+         "trait_short": "唯一存活时获得[相位γ]+[相位θ]；坠毁获得[扫描]"},
+        {"key": "frigate", "name": "护卫舰", "trait_name": "裙摆",
+         "cells": [(0, 0), (0, 1)], "weak_index": 0, "rot_k": [0, 1], "max_count": 2,
+         "trait": "裙摆：自身接壤时，消除自身及所接壤舰体的弱点。坠毁时：我方获得1发[相位扫描θ]。",
+         "trait_short": "接壤时消除自身及邻舰弱点；坠毁获得[相位θ]"},
+        {"key": "assault", "name": "突击舰", "trait_name": "宽恕",
+         "cells": [(0, 0), (0, 1), (0, 2)], "weak_index": 0, "rot_k": [0, 1], "max_count": 2,
+         "trait": "宽恕：击坠时，我方获得一发[齐射]，然后使自身弱点+1。",
          "trait_short": "击毁敌舰时获得[齐射]，自身弱点+1"},
-        {"key": "destroyer", "name": "驱逐舰", "trait_name": "强袭",
-         "cells": [(0, 0), (0, 1), (0, 2), (0, 3)], "weak_index": 0, "rot_k": [0, 1], "max_count": 2,
-         "trait": "强袭：当自身接壤时，我方获得1发[激光炮击α]。当自身孤立时，我方获得1发[激光炮击β]。",
+        {"key": "destroyer", "name": "驱逐舰", "trait_name": "悲悯",
+         "cells": [(0, 0), (0, 1), (0, 2), (0, 3)], "weak_index": 0, "rot_k": [0, 1], "max_count": 1,
+         "trait": "悲悯：当自身接壤时，我方获得1发[激光炮击α]。当自身孤立时，我方获得1发[激光炮击β]。",
          "trait_short": "接壤获得[激光α]，孤立获得[激光β]"},
-        {"key": "command", "name": "指挥舰", "trait_name": "计策",
+        {"key": "command", "name": "指挥舰", "trait_name": "羽翼",
          # T 字形 6 格：顶横 3 + 竖 4；弱点在竖笔底端 (3,1)
          "cells": [(0, 0), (0, 1), (0, 2), (1, 1), (2, 1), (3, 1)],
          "weak_index": 5, "rot_k": [0], "max_count": 1,
-         "trait": "计策：我方初始额外获得1发[相位扫描θ]。我方每回合可使用道具次数+1。",
-         "trait_short": "初始获得[相位θ]；每回合道具次数+1"},
+         "trait": "羽翼：我方初始可使用道具次数+1。存活时：通过弱点击坠敌舰时，我方获得1发[相位扫描θ]。",
+         "trait_short": "初始道具次数+1；弱点击坠获得[相位θ]"},
         {"key": "flagship", "name": "旗舰", "trait_name": "女神",
          # 十字形 6 格：横 3 + 竖 4；弱点在上方短柄顶端 (0,1)
          "cells": [(0, 1), (1, 0), (1, 1), (1, 2), (2, 1), (3, 1)],
          "weak_index": 0, "rot_k": [0], "max_count": 1,
-         "trait": "女神：我方初始额外获得1发[相位炮击γ]。击坠时：每回合限一次，我方可再次进行一次炮击。",
-         "trait_short": "初始获得[相位γ]；击毁敌舰可再炮击一次"},
+         "trait": "女神：我方初始额外获得1发[相位炮击γ]。击坠时：每回合限一次，我方下回合所有炮击升级为齐射。",
+         "trait_short": "初始获得[相位γ]；击坠下回合炮击升级齐射"},
     ],
 }
 
@@ -160,54 +156,41 @@ SHIP_KEYS = ["scout", "frigate", "assault", "destroyer", "command", "flagship"]
 #  舰队生成
 # ============================================================
 
-def _valid_fleets(bag, ship_count, mandatory, max_cells, side):
-    """枚举袋内所有「额外舰体」子集：额外数量 == ship_count - len(mandatory)、
-    加上 mandatory 后总格数 ≤ max_cells。返回合法额外舰体列表。"""
+def _valid_fleets(bag, mandatory, max_cells, side):
+    """枚举袋内所有「额外舰体」子集：加上 mandatory 后总格数 ≤ max_cells、
+    总舰数 ≥3；AI 额外限制 护卫舰+突击舰 ≤2。返回合法额外舰体列表。"""
     n = len(bag)
-    need = ship_count - len(mandatory)
     valid = []
     for mask in range(1 << n):
-        if bin(mask).count("1") != need:
-            continue
         subset = [bag[i] for i in range(n) if (mask >> i) & 1]
-        total = sum(SHIP_TYPES[side][k]["size"] for k in mandatory + subset)
-        if total <= max_cells:
-            valid.append(subset)
+        fleet = mandatory + subset
+        if len(fleet) < 3:
+            continue
+        total = sum(SHIP_TYPES[side][k]["size"] for k in fleet)
+        if total > max_cells:
+            continue
+        if side == "ai":
+            if sum(1 for k in fleet if k in ("frigate", "assault")) > 2:
+                continue
+        valid.append(subset)
     return valid
 
 
-def draw_ship_count(rng=None):
-    """本局 AI 方舰体总数：从 3~6 中随机抽取。"""
-    rng = rng or random
-    return rng.randint(3, 6)
-
-
-def player_ship_count_for(ai_count):
-    """对应关系：AI 3/4/5/6 艘 → 玩家 6/7/8/9 艘。"""
-    return ai_count + 3
-
-
-def generate_fleet(side, rng=None, ship_count=None):
+def generate_fleet(side, rng=None):
     """随机生成一方舰队（返回舰体 key 列表）。
 
-    - 舰体数：AI 3~6（必含 指挥舰+旗舰）；玩家 6~9（指挥舰、旗舰二选一）。
-    - 总格数只是上限（AI ≤33、玩家 ≤22），不要求填满。
-    - 舰体类型在各自上限（max_count）内随机分配。
+    - 双方均 ≥3 艘且必含 指挥舰+旗舰。
+    - 总格数只是上限（AI ≤35、玩家 ≤22），不要求填满。
+    - 舰体类型在各自上限（max_count）内随机分配；AI 额外限制护卫舰+突击舰 ≤2。
     """
     rng = rng or random
-    if ship_count is None:
-        ship_count = draw_ship_count(rng) if side == "ai" \
-            else player_ship_count_for(draw_ship_count(rng))
-    max_cells = 33 if side == "ai" else 22
-    if side == "ai":
-        mandatory = ["command", "flagship"]
-    else:
-        mandatory = [rng.choice(["command", "flagship"])]
-    bag = (["scout"] * 3 + ["frigate"] * 3
-           + ["assault"] * 3 + ["destroyer"] * 2)
-    subs = _valid_fleets(bag, ship_count, mandatory, max_cells, side)
+    max_cells = 35 if side == "ai" else 22
+    mandatory = ["command", "flagship"]
+    bag = (["scout"] * 3 + ["frigate"] * 2
+           + ["assault"] * 2 + ["destroyer"] * 1)
+    subs = _valid_fleets(bag, mandatory, max_cells, side)
     if not subs:
-        raise RuntimeError(f"无法为 {side} 生成合法舰队（{ship_count} 艘）")
+        raise RuntimeError(f"无法为 {side} 生成合法舰队")
     fleet = mandatory + list(rng.choice(subs))
     rng.shuffle(fleet)
     return fleet
@@ -218,7 +201,7 @@ def place_fleet(side, fleet, rng=None):
 
     board[r][c] 为舰体编号（1-based，0 表示空）。
     ships 每项：type/name/color/cells/weak_cells/hits/alive（按 fleet 原顺序返回）。
-    弱点按类型固定位置随旋转映射；入场特性（护卫舰护佑、突击舰藏匿）由
+    弱点按类型固定位置随旋转映射；入场特性（护卫舰佑鹤/裙摆、突击舰匿鹰）由
     apply_deploy_traits 单独调用。
     """
     rng = rng or random
@@ -292,8 +275,8 @@ def touches_boundary(ship):
 
 
 def eliminate_weak_points(ship):
-    """消除一艘舰体的全部弱点。护卫舰的弱点不可被消除、无弱点时返回 False。"""
-    if ship["type"] == "frigate" or not ship["weak_cells"]:
+    """消除一艘舰体的全部弱点；无弱点时返回 False。"""
+    if not ship["weak_cells"]:
         return False
     ship["weak_cells"].clear()
     return True
@@ -310,47 +293,43 @@ def add_weak_points(ship, n):
     return n
 
 
-def frigate_protect(ship, ships, dir_order, gain):
-    """护卫舰护佑：按 dir_order 找一艘可消除弱点的邻舰，消除其弱点并使自身弱点 +gain。
-
-    返回被护佑的邻舰（无则 None）。
-    """
-    for dr, dc in dir_order:
-        for r, c in ship["cells"]:
+def _eliminate_adjacent_weak_points(ship, ships):
+    """消除 ship 所接壤（上下左右）的所有邻舰弱点，返回消除的舰体数。"""
+    seen = set()
+    for r, c in ship["cells"]:
+        for dr, dc in FOUR_DIRS:
             other = ship_at(ships, (r + dr, c + dc))
-            if other is None or other is ship:
-                continue
-            if eliminate_weak_points(other):
-                add_weak_points(ship, gain)
-                return other
-    return None
+            if other is not None and other is not ship and id(other) not in seen:
+                seen.add(id(other))
+                eliminate_weak_points(other)
+    return len(seen)
 
 
 def apply_deploy_traits(ships, side):
     """入场特性（开局一次），返回事件文本列表。
 
-    AI：护卫舰护佑（+3，上→下→左→右）；突击舰藏匿（孤立则消除自身弱点）。
-    玩家：护卫舰防卫（+1，上→下→右→左）。
+    AI：护卫舰佑鹤（接壤→消除自身弱点）；突击舰匿鹰（孤立→消除自身弱点）。
+    玩家：护卫舰裙摆（接壤→消除自身及所接壤舰体弱点）。
     """
     events = []
-    if side == "ai":
-        dir_order = DIR_ORDER_AI
-        gain = 3
-    else:
-        dir_order = DIR_ORDER_PLAYER
-        gain = 1
-
     for s in ships:
-        if s["type"] == "frigate" and s["alive"]:
-            other = frigate_protect(s, ships, dir_order, gain)
-            if other is not None:
-                events.append(f"{s['name']}护佑了{other['name']}，自身弱点+{gain}")
-    if side == "ai":
-        for s in ships:
-            if s["type"] == "assault" and s["alive"]:
-                if not has_adjacent_ship(s, ships):
-                    s["weak_cells"].clear()
-                    events.append(f"{s['name']}藏匿：消除自身弱点")
+        if not s["alive"]:
+            continue
+        if s["type"] == "frigate":
+            if has_adjacent_ship(s, ships):
+                if side == "ai":
+                    if eliminate_weak_points(s):
+                        events.append(f"{s['name']}佑鹤：消除自身弱点")
+                else:
+                    if eliminate_weak_points(s):
+                        events.append(f"{s['name']}裙摆：消除自身弱点")
+                    n = _eliminate_adjacent_weak_points(s, ships)
+                    if n:
+                        events.append(f"{s['name']}裙摆：消除{n}艘邻舰的弱点")
+        elif s["type"] == "assault" and side == "ai":
+            if not has_adjacent_ship(s, ships):
+                s["weak_cells"].clear()
+                events.append(f"{s['name']}匿鹰：消除自身弱点")
     return events
 
 
@@ -377,7 +356,7 @@ def special_shot_on_destroy(ship):
 
 
 def command_eliminate_on_destroy(ships):
-    """AI 指挥舰坠毁：消除己方所有舰体弱点（护卫舰除外），返回事件文本。"""
+    """AI 指挥舰坠毁：消除己方所有舰体弱点，返回事件文本。"""
     n = 0
     for s in ships:
         if s["alive"] and eliminate_weak_points(s):
@@ -413,10 +392,12 @@ def is_destroyed(ship):
 def resolve_hits(ships, shots, cells):
     """对一组格子结算命中（普通/特殊/齐射共用）。
 
-    shots 为攻击方的已炮击集合（会被更新）；返回 (events, destroyed_ships)。
+    shots 为攻击方的已炮击集合（会被更新）；
+    返回 (events, destroyed_ships, weak_killed)，weak_killed 为本次通过弱点击毁的舰体列表。
     """
     events = []
     destroyed = []
+    weak_killed = []
     for p in cells:
         if p in shots:
             continue
@@ -425,17 +406,19 @@ def resolve_hits(ships, shots, cells):
         if ship is None:
             events.append(f"{fmt(p)}落空")
             continue
-        destroyed_now, _hit_weak = hit_cell(ship, p)
+        destroyed_now, hit_weak = hit_cell(ship, p)
         if destroyed_now:
             if ship not in destroyed:
                 destroyed.append(ship)
+                if hit_weak:
+                    weak_killed.append(ship)
             shots.update(ship["cells"])  # 击毁后整舰格子视为已炮击
             events.append(f"击毁{ship['name']}！")
         else:
             events.append(f"命中{ship['name']}！")
     if not events:
         events.append("落空")
-    return events, destroyed
+    return events, destroyed, weak_killed
 
 
 # ============================================================
@@ -481,15 +464,15 @@ def row_cells(r):
     return [(r, c) for c in range(SIZE)]
 
 
-def line_4_vertical(anchor):
-    """以 anchor 为锚的竖直 4 格直线（越界时夹回棋盘内）。"""
+def line_6_vertical(anchor):
+    """以 anchor 为锚的竖直 6 格直线（越界时夹回棋盘内）。"""
     r, c = anchor
-    r0 = min(max(r - 1, 0), SIZE - 4)
-    return [(rr, c) for rr in range(r0, r0 + 4)]
+    r0 = min(max(r - 2, 0), SIZE - 6)
+    return [(rr, c) for rr in range(r0, r0 + 6)]
 
 
-def line_4_horizontal(anchor):
-    """以 anchor 为锚的水平 4 格直线（越界时夹回棋盘内）。"""
+def line_6_horizontal(anchor):
+    """以 anchor 为锚的水平 6 格直线（越界时夹回棋盘内）。"""
     r, c = anchor
-    c0 = min(max(c - 1, 0), SIZE - 4)
-    return [(r, cc) for cc in range(c0, c0 + 4)]
+    c0 = min(max(c - 2, 0), SIZE - 6)
+    return [(r, cc) for cc in range(c0, c0 + 6)]

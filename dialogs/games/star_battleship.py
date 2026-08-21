@@ -2,7 +2,7 @@
 """
 Remy 桌宠 - 星海战棋小游戏（确定性 AI）
 
-10x10 棋盘：AI 方舰体总格 33、每回合最多 3 次炮击；玩家方 22 格、每回合 1 次炮击。
+10x10 棋盘：AI 方舰体总格 ≤35、每回合最多 3 次炮击；玩家方 ≤22 格、每回合 1 次炮击。
 舰体分「弱点部位 / 普通部位」：命中弱点立即击毁，命中普通累计损失，打光全格也击毁。
 双方各 6 类舰体（形状/弱点/特性不同），带图鉴、道具、特殊炮击、先手抽取动画、
 播报窗口与历史记录。所有规则在 star_battleship_rules 纯逻辑模块中，本文件只负责
@@ -27,9 +27,7 @@ from utils import resource_path
 SIZE = R.SIZE
 CELL = 30
 
-# 炮击 / 道具两大类
-SHOT_MODES = {None, "laser_alpha", "laser_beta", "phase_gamma"}
-ITEM_MODES = {"scan", "phase_theta", "volley"}
+# 炮击 / 道具两大类：炮击仅普通炮击（None）；激光α/β、相位γ、扫描、齐射、相位扫描θ 均属道具
 
 ITEM_LABELS = {
     "scan": "🔍 扫描",
@@ -38,6 +36,34 @@ ITEM_LABELS = {
     "laser_beta": "📐 激光β",
     "phase_gamma": "🌀 相位γ",
     "phase_theta": "🔭 相位θ",
+}
+
+# 蕾咪全局被动（每局随机一个，对应左侧圆形头像 + 表情）
+REMY_BUFFS = {
+    "steady": {
+        "name": "沉稳",
+        "avatar": "Remy_Shut.png",
+        "tagline": "每回合额外齐射1次",
+        "desc": "【沉稳】\n每回合额外\n齐射一次（2×2）",
+    },
+    "fierce": {
+        "name": "刚烈",
+        "avatar": "Remy_Angry.png",
+        "tagline": "己方舰体被命中→下回合额外炮击2次；被击坠→下回合额外齐射1次",
+        "desc": "【刚烈】\n己方舰体被命中时\n下回合额外炮击2次\n己方舰体被击坠时\n下回合额外齐射1次",
+    },
+    "humble": {
+        "name": "谦卑",
+        "avatar": "Remy_Wronged.png",
+        "tagline": "奇数回合额外炮击3次，偶数回合额外炮击1次",
+        "desc": "【谦卑】\n奇数回合\n额外炮击3次\n偶数回合\n额外炮击1次",
+    },
+    "composed": {
+        "name": "淑均",
+        "avatar": "Remy_Open.png",
+        "tagline": "清除我方舰体所有弱点",
+        "desc": "【淑均】\n清除我方舰体\n所有弱点",
+    },
 }
 
 SEA_COLOR = "#A8D8E8"
@@ -74,14 +100,14 @@ def _draw_cross(painter, rect):
 
 
 def _draw_hexagon(painter, rect, solid=True):
-    """弱点六边形：实心（白底深描边）或空心（仅白描边）。"""
+    """弱点六边形：有弱点实心（白底深描边）；无弱点（已消除）用同色 30% 不透明度的浅白填充。"""
     poly = _hexagon_points(rect)
     if solid:
         painter.setBrush(QBrush(QColor(255, 255, 255, 210)))
         painter.setPen(QPen(QColor("#333333"), 1.5))
     else:
-        painter.setBrush(Qt.NoBrush)
-        painter.setPen(QPen(QColor("#FFFFFF"), 2))
+        painter.setBrush(QBrush(QColor(255, 255, 255, 76)))  # 白，30% 不透明度
+        painter.setPen(QPen(QColor("#333333"), 1.5))
     painter.drawPolygon(poly)
 
 
@@ -268,45 +294,43 @@ class ShipShapeWidget(QWidget):
 
 
 class ShipCodexDialog(QDialog):
-    """图鉴：展示双方 12 类舰体的名字、形状、弱点与特性。"""
+    """图鉴：左半边蕾咪舰队、右半边我方舰队，表格对齐，介绍文案居中。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("📖 星海战棋 · 舰体图鉴")
-        self.setGeometry(150, 80, 720, 640)
+        self.setGeometry(150, 70, 800, 720)
         self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: Microsoft YaHei;")
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
         title = QLabel("📖 舰体图鉴")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #DAAD69;")
+        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #DAAD69;")
         layout.addWidget(title)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
         content = QWidget()
-        content_layout = QVBoxLayout(content)
+        grid = QGridLayout(content)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(8)
+        grid.setContentsMargins(4, 4, 4, 4)
 
-        for side, side_name in (("ai", "蕾咪舰队"), ("player", "我方舰队")):
-            header = QLabel(f"—— {side_name} ——")
-            header.setStyleSheet("font-size: 14px; font-weight: bold; color: #2E6C8E;")
-            content_layout.addWidget(header)
-            for key in R.SHIP_KEYS:
-                t = R.SHIP_TYPES[side][key]
-                row = QHBoxLayout()
-                row.addWidget(ShipShapeWidget(side, key))
-                info = QLabel(f"{t['name']}　【{t['trait_name']}】")
-                info.setStyleSheet("font-size: 13px; font-weight: bold;")
-                desc = QLabel(t["trait"])
-                desc.setWordWrap(True)
-                desc.setStyleSheet("color: #666666; font-size: 12px;")
-                text_col = QVBoxLayout()
-                text_col.addWidget(info)
-                text_col.addWidget(desc)
-                row.addLayout(text_col, 1)
-                row.addStretch()
-                content_layout.addLayout(row)
-        content_layout.addStretch()
+        # 表头：左「蕾咪舰队」右「我方舰队」
+        grid.addWidget(self._codex_header("🛸 蕾咪舰队"), 0, 0)
+        grid.addWidget(self._codex_header("⚓ 我方舰队"), 0, 1)
+
+        # 每类舰体一行，左右对照（格数多的在上，格数少的在下）
+        for i, key in enumerate(reversed(R.SHIP_KEYS), start=1):
+            grid.addWidget(self._codex_cell("ai", key), i, 0)
+            grid.addWidget(self._codex_cell("player", key), i, 1)
+
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
         scroll.setWidget(content)
         layout.addWidget(scroll)
 
@@ -314,9 +338,52 @@ class ShipCodexDialog(QDialog):
         close_btn.clicked.connect(self.accept)
         close_btn.setStyleSheet(
             "QPushButton { background-color: #333333; color: white; border: none;"
-            " border-radius: 6px; padding: 8px 24px; font-size: 13px; }"
+            " border-radius: 6px; padding: 8px 28px; font-size: 13px; }"
             "QPushButton:hover { background-color: #555555; }")
         layout.addWidget(close_btn, alignment=Qt.AlignCenter)
+
+    @staticmethod
+    def _codex_header(text):
+        """表格表头（居中、蓝色底）。"""
+        lab = QLabel(text)
+        lab.setAlignment(Qt.AlignCenter)
+        lab.setStyleSheet(
+            "font-size: 15px; font-weight: bold; color: #FFFFFF;"
+            " background-color: #2E6C8E; border-radius: 6px; padding: 8px;")
+        return lab
+
+    @staticmethod
+    def _codex_cell(side, key):
+        """单格：舰体形状（固定高度居中）+ 名字 + 特性说明（居中）。"""
+        t = R.SHIP_TYPES[side][key]
+        frame = QFrame()
+        frame.setStyleSheet(
+            "QFrame { background-color: #FBFDFF; border: 1px solid #DCE8F0;"
+            " border-radius: 8px; }")
+        v = QVBoxLayout(frame)
+        v.setContentsMargins(12, 12, 12, 12)
+        v.setSpacing(7)
+
+        # 舰体形状放进固定高度的容器里垂直居中，保证左右两列对齐
+        holder = QWidget()
+        holder.setFixedHeight(72)
+        sh = QHBoxLayout(holder)
+        sh.setContentsMargins(0, 0, 0, 0)
+        sh.addWidget(ShipShapeWidget(side, key), alignment=Qt.AlignCenter)
+        v.addWidget(holder)
+
+        name = QLabel(f"{t['name']}　【{t['trait_name']}】")
+        name.setAlignment(Qt.AlignCenter)
+        name.setStyleSheet("font-size: 13px; font-weight: bold; color: #2E6C8E;")
+        v.addWidget(name)
+
+        desc = QLabel(t["trait"])
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #666666; font-size: 12px;")
+        v.addWidget(desc)
+        v.addStretch()
+        return frame
 
 
 class StarBattleshipDialog(QDialog):
@@ -327,6 +394,7 @@ class StarBattleshipDialog(QDialog):
         self.setStyleSheet("background-color: #ffffff; color: #333333; font-family: Microsoft YaHei;")
         self.init_game()
         self.init_ui()
+        self._codex = None  # 图鉴窗口引用（无模态，惰性创建）
 
         # 击沉舰体边框闪烁定时器（首次击沉时启动，2 秒后自动停止）
         self._sunk_flash_timer = QTimer(self)
@@ -382,36 +450,47 @@ class StarBattleshipDialog(QDialog):
 
         self._shots_remaining = 0
         self._items_remaining = 0
-        self._extra_shot_used = False
+        self._volley_turn = False        # 本回合普通炮击是否升级为齐射
+        self._next_turn_volley = False   # 下回合所有炮击升级为齐射（旗舰【女神】）
+        self._volley_upgrade_used = False  # 本回合是否已触发过【女神】
+        self._scout_last_granted = False   # 侦察梭【垂眸】一次性奖励是否已发放
         self._pending_ai_specials = []
+
+        # 蕾咪全局被动：每局随机一个（对应左侧头像 + 表情说明）
+        self._remy_buff_key = random.choice(list(REMY_BUFFS))
+        self._remy_angry_shots = 0        # 【刚烈】己方舰体被命中 → 下回合额外炮击
+        self._remy_angry_volley = 0       # 【刚烈】己方舰体被击坠 → 下回合额外齐射
 
         self._coin_timer = None
         self._coin_ticks = 0
-
-        # 本局双方舰体数：AI 3~6 随机抽取，玩家按对应关系 6~9
-        self.ai_ship_count = R.draw_ship_count()
-        self.player_ship_count = R.player_ship_count_for(self.ai_ship_count)
 
         self._sunk_ships = {}             # 已击沉舰体 id -> 击沉时刻（用于边框闪烁）
         self._shot_effects = []           # 炮击动效：{board, cells, start}
         self._scan_effects = []           # 扫描动效：{cells, r0, c0, k, start}
 
         self._deploy_ai()
+        # 全局被动【淑均】：开局清除我方（蕾咪）所有舰体弱点
+        if self._remy_buff_key == "composed":
+            for s in self.ai_ships:
+                R.eliminate_weak_points(s)
         self._deploy_player()
+        # 换新一局时同步刷新左侧被动头像与说明
+        if hasattr(self, "_remy_avatar_label"):
+            self._update_remy_passive()
 
     def _deploy_ai(self):
-        self.ai_fleet = R.generate_fleet("ai", ship_count=self.ai_ship_count)
+        self.ai_fleet = R.generate_fleet("ai")
         self.ai_board, self.ai_ships = R.place_fleet("ai", self.ai_fleet)
         R.apply_deploy_traits(self.ai_ships, "ai")
 
     def _deploy_player(self):
-        self.player_fleet = R.generate_fleet("player", ship_count=self.player_ship_count)
+        self.player_fleet = R.generate_fleet("player")
         self.player_board, self.player_ships = R.place_fleet("player", self.player_fleet)
         R.apply_deploy_traits(self.player_ships, "player")
         self._init_player_items()
 
     def _init_player_items(self):
-        self.player_items = {"scan": 2, "volley": 2, "laser_alpha": 0,
+        self.player_items = {"scan": 1, "volley": 1, "laser_alpha": 0,
                              "laser_beta": 0, "phase_gamma": 0, "phase_theta": 0}
         for s in self.player_ships:
             if s["type"] == "destroyer":
@@ -419,8 +498,6 @@ class StarBattleshipDialog(QDialog):
                     self.player_items["laser_alpha"] += 1
                 else:
                     self.player_items["laser_beta"] += 1
-        if R.has_alive(self.player_ships, "command"):
-            self.player_items["phase_theta"] += 1
         if R.has_alive(self.player_ships, "flagship"):
             self.player_items["phase_gamma"] += 1
 
@@ -621,30 +698,41 @@ class StarBattleshipDialog(QDialog):
         return frame, []
 
     def _build_remy_passive(self):
-        """蕾咪圆形头像 + 【沉稳】被动说明（弹窗左侧）。"""
+        """蕾咪圆形头像 + 本局全局被动说明（弹窗左侧，固定头像与文案方框位置）。"""
         widget = QWidget()
-        widget.setFixedWidth(120)
+        widget.setFixedWidth(124)
         v = QVBoxLayout(widget)
-        v.setContentsMargins(6, 8, 6, 8)
-        v.setSpacing(6)
-        v.addStretch()
+        v.setContentsMargins(6, 10, 6, 10)
+        v.setSpacing(10)
 
-        avatar = QLabel()
-        avatar.setFixedSize(96, 96)
-        avatar.setPixmap(self._circular_pixmap("Remy_Shut.png", 96))
-        avatar.setAlignment(Qt.AlignCenter)
-        v.addWidget(avatar, alignment=Qt.AlignCenter)
+        self._remy_avatar_label = QLabel()
+        self._remy_avatar_label.setFixedSize(96, 96)
+        self._remy_avatar_label.setAlignment(Qt.AlignCenter)
+        v.addWidget(self._remy_avatar_label, alignment=Qt.AlignCenter)
 
-        desc = QLabel("【沉稳】\n每回合额外\n齐射一次（2×2）")
-        desc.setAlignment(Qt.AlignCenter)
-        desc.setStyleSheet("font-size: 11px; font-weight: bold; color: #2E6C8E;")
-        v.addWidget(desc, alignment=Qt.AlignCenter)
+        self._remy_desc_label = QLabel()
+        self._remy_desc_label.setAlignment(Qt.AlignCenter)
+        self._remy_desc_label.setWordWrap(True)
+        self._remy_desc_label.setFixedWidth(108)
+        self._remy_desc_label.setMinimumHeight(72)
+        self._remy_desc_label.setStyleSheet(
+            "background-color: #EEF6FB; color: #2E6C8E;"
+            " border: 1px solid #BBD6E8; border-radius: 6px;"
+            " padding: 6px; font-size: 11px; font-weight: bold;")
+        v.addWidget(self._remy_desc_label, alignment=Qt.AlignCenter)
         v.addStretch()
+        self._update_remy_passive()
         return widget
 
+    def _update_remy_passive(self):
+        """按当前全局被动刷新左侧头像与说明文案。"""
+        buff = REMY_BUFFS[self._remy_buff_key]
+        self._remy_avatar_label.setPixmap(self._circular_pixmap(buff["avatar"], 96))
+        self._remy_desc_label.setText(buff["desc"])
+
     @staticmethod
-    def _circular_pixmap(path, size):
-        """把图片裁成 size×size 的圆形 QPixmap（居中裁剪 + 椭圆裁剪）。"""
+    def _circular_pixmap(path, size, border="#DAAD69"):
+        """把图片裁成 size×size 的圆形 QPixmap（居中裁剪 + 椭圆裁剪 + 圆形描边框）。"""
         pm = QPixmap(resource_path(path))
         if pm.isNull():
             pm = QPixmap(size, size)
@@ -661,6 +749,10 @@ class StarBattleshipDialog(QDialog):
         clip.addEllipse(0, 0, size, size)
         painter.setClipPath(clip)
         painter.drawPixmap(0, 0, pm)
+        painter.setClipping(False)
+        painter.setPen(QPen(QColor(border), 3))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(QRectF(3, 3, size - 6, size - 6))
         painter.end()
         return out
 
@@ -682,8 +774,7 @@ class StarBattleshipDialog(QDialog):
                 elif pos in ship["hits"]:
                     cell.set_state("hit", ship["color"])
                 else:
-                    cell.set_state("ship", ship["color"],
-                                   "solid" if pos in ship["weak_cells"] else None)
+                    cell.set_state("ship", ship["color"], self._alive_weak_marker(ship, pos))
                 cell.set_latest_shot(pos in self.ai_latest_shot)
 
     def _render_ai_board(self):
@@ -702,8 +793,7 @@ class StarBattleshipDialog(QDialog):
                     else:
                         cell.set_state("hit", ship["color"])
                 elif reveal and ship is not None:
-                    cell.set_state("reveal", ship["color"],
-                                   "solid" if pos in ship["weak_cells"] else None)
+                    cell.set_state("reveal", ship["color"], self._alive_weak_marker(ship, pos))
                 elif pos in self.player_scanned:
                     cell.set_state("scan_ship" if self.player_scanned[pos] else "scan_empty")
                 else:
@@ -720,11 +810,11 @@ class StarBattleshipDialog(QDialog):
         pl_alive = sum(1 for s in self.player_ships if s["alive"])
         ai_shots = 1 + (1 if R.has_alive(self.ai_ships, "command") else 0) \
                      + (1 if R.has_alive(self.ai_ships, "flagship") else 0)
-        pl_shots = self._shots_per_turn() \
-                   + (1 if R.has_alive(self.player_ships, "flagship") else 0)
+        pl_shots = self._shots_per_turn()
+        buff_name = REMY_BUFFS[self._remy_buff_key]["name"]
         self.info_label.setText(
-            f"🛸 蕾咪舰队 {ai_alive}/{self.ai_ship_count} 艘 · 每回合 💥×{ai_shots}＋【沉稳】齐射"
-            f"　　⚓ 我方舰队 {pl_alive}/{self.player_ship_count} 艘 · 每回合 💥×{pl_shots}")
+            f"🛸 蕾咪舰队 {ai_alive}/{len(self.ai_ships)} 艘 · 每回合 💥×{ai_shots} · 被动【{buff_name}】"
+            f"　　⚓ 我方舰队 {pl_alive}/{len(self.player_ships)} 艘 · 每回合 💥×{pl_shots}")
 
     def _refresh_roster(self, ships, labels, frame):
         # 名册容器：标题之后的竖直布局
@@ -901,18 +991,13 @@ class StarBattleshipDialog(QDialog):
             return False
         if mode is None:
             return self._shots_remaining > 0
-        if mode in SHOT_MODES:
-            return (self._shots_remaining > 0) and self.player_items.get(mode, 0) > 0
         return (self._items_remaining > 0) and self.player_items.get(mode, 0) > 0
 
     def _sync_item_buttons(self):
         can = (self.phase == "battle" and self.current == "player" and not self.waiting)
         for key, btn in self.item_buttons.items():
             count = self.player_items.get(key, 0)
-            if key in SHOT_MODES:
-                usable = can and self._shots_remaining > 0 and count > 0
-            else:
-                usable = can and self._items_remaining > 0 and count > 0
+            usable = can and self._items_remaining > 0 and count > 0
             btn.setText(f"{ITEM_LABELS[key]} ×{count}")
             btn.setEnabled(usable)
             btn.setChecked(False)
@@ -978,9 +1063,9 @@ class StarBattleshipDialog(QDialog):
         if mode in ("scan", "volley"):
             return R.area_2x2(anchor)
         if mode == "laser_alpha":
-            return R.line_4_vertical(anchor)
+            return R.line_6_vertical(anchor)
         if mode == "laser_beta":
-            return R.line_4_horizontal(anchor)
+            return R.line_6_horizontal(anchor)
         if mode in ("phase_gamma", "phase_theta"):
             return R.area_3x3(anchor)
         return [anchor]
@@ -990,9 +1075,14 @@ class StarBattleshipDialog(QDialog):
         if self.phase != "battle" or self.current != "player" or self.waiting:
             return
         mode = self.action_mode
-        if mode is None or not self._can_use_action(mode):
+        if not self._can_use_action(mode):
             return
-        self._apply_preview(self._action_cells(mode, (r, c)))
+        if mode is None:
+            # 普通炮击：默认单格；旗舰【女神】强化时升级为 2×2 齐射
+            cells = R.area_2x2((r, c)) if self._volley_turn else [(r, c)]
+        else:
+            cells = self._action_cells(mode, (r, c))
+        self._apply_preview(cells)
 
     def _on_player_cell_hover(self, r, c):
         self._update_ship_tip("player", r, c)
@@ -1026,17 +1116,18 @@ class StarBattleshipDialog(QDialog):
             if (r, c) in self.player_shots:
                 return
             self._shots_remaining -= 1
-            self._player_attack([(r, c)], f"炮击{R.fmt((r, c))}")
+            if self._volley_turn:
+                cells = R.area_2x2((r, c))
+                self._player_attack(cells, f"齐射{R.fmt((r, c))}一带")
+            else:
+                self._player_attack([(r, c)], f"炮击{R.fmt((r, c))}")
         elif mode in ("scan", "phase_theta"):
             self._items_remaining -= 1
             self.player_items[mode] -= 1
             self._do_scan(mode, (r, c))
         else:
-            # volley（道具）或激光α/β、相位γ（特殊炮击）
-            if mode == "volley":
-                self._items_remaining -= 1
-            else:
-                self._shots_remaining -= 1
+            # 激光α/β、相位γ、齐射 均属道具
+            self._items_remaining -= 1
             self.player_items[mode] -= 1
             cells = self._action_cells(mode, (r, c))
             self._player_attack(cells, f"{ITEM_LABELS[mode]}{R.fmt((r, c))}一带")
@@ -1058,10 +1149,27 @@ class StarBattleshipDialog(QDialog):
 
     def _player_attack(self, cells, label):
         self._record_shot_effect("ai", cells)
-        events, destroyed = R.resolve_hits(self.ai_ships, self.player_shots, cells)
+        before_hits = {id(s): len(s["hits"]) for s in self.ai_ships if s["alive"]}
+        events, destroyed, weak_killed = R.resolve_hits(self.ai_ships, self.player_shots, cells)
         self._broadcast(f"我方{label}：{'；'.join(events)}")
         if destroyed:
             self._on_player_destroyed_ai(destroyed)
+        # 蕾咪全局被动【刚烈】：己方舰体被命中→下回合额外炮击2次；被击坠→下回合额外齐射1次
+        if self._remy_buff_key == "fierce":
+            hit_but_alive = any(
+                s["alive"] and len(s["hits"]) > before_hits.get(id(s), 0)
+                for s in self.ai_ships
+            )
+            if hit_but_alive:
+                self._remy_angry_shots += 2
+                self._broadcast("蕾咪触发【刚烈】，下回合额外炮击2次！")
+            if destroyed:
+                self._remy_angry_volley += 1
+                self._broadcast("蕾咪触发【刚烈】，下回合额外齐射1次！")
+        # 指挥舰【羽翼】：存活时，通过弱点击坠敌舰 → 获得相位θ（无每回合次数限制）
+        if weak_killed and R.has_alive(self.player_ships, "command"):
+            self.player_items["phase_theta"] += len(weak_killed)
+            self._broadcast(f"我方指挥舰触发【羽翼】，获得{len(weak_killed)}发[相位扫描θ]！")
 
     def _on_player_destroyed_ai(self, destroyed):
         for ship in destroyed:
@@ -1079,7 +1187,7 @@ class StarBattleshipDialog(QDialog):
                 if msg:
                     self._broadcast(f"蕾咪{msg}")
 
-            # 玩家突击舰【绝命】：每击毁一艘 → 获得1发齐射 + 各突击舰弱点+1
+            # 玩家突击舰【宽恕】：每击毁一艘 → 获得1发齐射 + 各突击舰弱点+1
             alive_assaults = [s for s in self.player_ships
                               if s["type"] == "assault" and s["alive"]]
             if alive_assaults:
@@ -1087,13 +1195,13 @@ class StarBattleshipDialog(QDialog):
                 for a in alive_assaults:
                     if len(a["weak_cells"]) < 3:
                         R.add_weak_points(a, 1)
-                self._broadcast("我方突击舰触发【绝命】，我方获得1发[齐射]！")
+                self._broadcast("我方突击舰触发【宽恕】，我方获得1发[齐射]！")
 
-        # 旗舰【女神】：一回合内击毁敌舰可再炮击一次（每回合限一次）
-        if R.has_alive(self.player_ships, "flagship") and not self._extra_shot_used:
-            self._extra_shot_used = True
-            self._shots_remaining += 1
-            self._broadcast("我方旗舰触发【女神】，可再次进行一次炮击！")
+        # 旗舰【女神】：一回合内击毁敌舰 → 下回合所有炮击升级为齐射（每回合限一次）
+        if R.has_alive(self.player_ships, "flagship") and not self._volley_upgrade_used:
+            self._volley_upgrade_used = True
+            self._next_turn_volley = True
+            self._broadcast("我方旗舰触发【女神】，下回合所有炮击升级为齐射！")
 
     def _after_player_action(self):
         self._render_ai_board()
@@ -1132,6 +1240,12 @@ class StarBattleshipDialog(QDialog):
             return
         n = 1 + (1 if R.has_alive(self.ai_ships, "command") else 0) \
               + (1 if R.has_alive(self.ai_ships, "flagship") else 0)
+        # 全局被动【谦卑】：奇数回合额外炮击3次，偶数回合额外炮击1次
+        if self._remy_buff_key == "humble":
+            n += 3 if (self.round % 2 == 1) else 1
+        # 全局被动【刚烈】：己方舰体被命中时，下回合额外炮击2次
+        if self._remy_buff_key == "fierce":
+            n += self._remy_angry_shots
         for kind in self._ai_shot_plan(n):
             target = self._ai_pick_cell()
             if target is None:
@@ -1140,13 +1254,23 @@ class StarBattleshipDialog(QDialog):
             if all(R.is_destroyed(s) for s in self.player_ships):
                 self._game_over(player_won=False)
                 return
-        # 全局被动【沉稳】：每回合额外齐射一次（2×2）
-        volley_target = self._ai_pick_cell()
-        if volley_target is not None:
+        # 全局被动【沉稳】/【刚烈】：额外齐射
+        extra_volleys = 0
+        if self._remy_buff_key == "steady":
+            extra_volleys += 1
+        if self._remy_buff_key == "fierce":
+            extra_volleys += self._remy_angry_volley
+        for _ in range(extra_volleys):
+            volley_target = self._ai_pick_cell()
+            if volley_target is None:
+                break
             self._ai_fire("volley", volley_target)
-        if all(R.is_destroyed(s) for s in self.player_ships):
-            self._game_over(player_won=False)
-            return
+            if all(R.is_destroyed(s) for s in self.player_ships):
+                self._game_over(player_won=False)
+                return
+        # 【刚烈】的「下回合」加成已兑现，清零
+        self._remy_angry_shots = 0
+        self._remy_angry_volley = 0
         self.round += 1
         self._log(f"——— 第 {self.round} 回合 ———")
         self._start_player_turn()
@@ -1170,23 +1294,24 @@ class StarBattleshipDialog(QDialog):
     def _ai_fire(self, kind, target):
         r, c = target
         if kind == "laser_col":
-            cells = R.line_4_vertical(target)
-            desc = f"激光炮击α（{R.col_name(c)}列4格一带）"
+            cells = R.column_cells(c)
+            desc = f"激光炮击α（{R.col_name(c)}列一带）"
         elif kind == "laser_row":
-            cells = R.line_4_horizontal(target)
-            desc = f"激光炮击β（{r + 1}行4格一带）"
+            cells = R.row_cells(r)
+            desc = f"激光炮击β（{r + 1}行一带）"
         elif kind == "phase_3x3":
             cells = R.area_3x3(target)
             desc = f"相位炮击γ（{R.fmt(target)}一带）"
         elif kind == "volley":
             cells = R.area_2x2(target)
-            desc = f"【沉稳】齐射（{R.fmt(target)}一带）"
+            buff_name = REMY_BUFFS[self._remy_buff_key]["name"]
+            desc = f"【{buff_name}】齐射（{R.fmt(target)}一带）"
         else:
             cells = [target]
             desc = f"炮击{R.fmt(target)}"
         self.ai_latest_shot.update(cells)
         self._record_shot_effect("player", cells)
-        events, destroyed = R.resolve_hits(self.player_ships, self.ai_shots, cells)
+        events, destroyed, _weak_killed = R.resolve_hits(self.player_ships, self.ai_shots, cells)
         for ship in destroyed:
             self._on_player_ship_destroyed(ship)
         self._broadcast(f"蕾咪{desc}：{'；'.join(events)}")
@@ -1200,8 +1325,17 @@ class StarBattleshipDialog(QDialog):
             self.player_items["scan"] += 1
             self._broadcast(f"我方{ship['name']}触发【{ship['trait_name']}】，获得1发[扫描]！")
         elif ship["type"] == "frigate":
-            self.player_items["scan"] += 1
-            self._broadcast(f"我方{ship['name']}触发【{ship['trait_name']}】，获得1发[扫描]！")
+            self.player_items["phase_theta"] += 1
+            self._broadcast(f"我方{ship['name']}触发【{ship['trait_name']}】，获得1发[相位扫描θ]！")
+        # 侦察梭【垂眸】：成为最后存活一类时，每艘存活侦察梭各获得相位γ+相位θ
+        if (R.last_surviving_type(self.player_ships) == "scout"
+                and not self._scout_last_granted):
+            self._scout_last_granted = True
+            scount = sum(1 for s in self.player_ships
+                         if s["type"] == "scout" and s["alive"])
+            self.player_items["phase_gamma"] += scount
+            self.player_items["phase_theta"] += scount
+            self._broadcast(f"我方侦察梭触发【垂眸】，获得{scount}发[相位炮击γ]和{scount}发[相位扫描θ]！")
 
     def _ai_pick_cell(self):
         for s in self.player_ships:
@@ -1218,11 +1352,13 @@ class StarBattleshipDialog(QDialog):
     # ============================================================
 
     def _shots_per_turn(self):
-        """本回合我方炮击次数：基础 1 + 侦察梭【斥候】（唯一存活时 +1）。"""
-        return 1 + (1 if R.last_surviving_type(self.player_ships) == "scout" else 0)
+        """本回合我方炮击次数：基础 1，每击沉一艘 AI 突击舰/护卫舰 +1。"""
+        bonus = sum(1 for s in self.ai_ships
+                    if not s["alive"] and s["type"] in ("frigate", "assault"))
+        return 1 + bonus
 
     def _items_per_turn(self):
-        """本回合我方道具次数：基础 1 + 指挥舰【计策】（+1）。"""
+        """本回合我方道具次数：基础 1 + 指挥舰【羽翼】（+1）。"""
         return 1 + (1 if R.has_alive(self.player_ships, "command") else 0)
 
     def _start_player_turn(self):
@@ -1230,7 +1366,9 @@ class StarBattleshipDialog(QDialog):
         self.waiting = False
         self._shots_remaining = self._shots_per_turn()
         self._items_remaining = self._items_per_turn()
-        self._extra_shot_used = False
+        self._volley_turn = self._next_turn_volley
+        self._next_turn_volley = False
+        self._volley_upgrade_used = False
         self.action_mode = None
         self._clear_preview()
         self._update_turn_ui()
@@ -1265,6 +1403,10 @@ class StarBattleshipDialog(QDialog):
     def _start_coinflip(self):
         if self.phase != "placement":
             return
+        tactics = self._ask_tactics()
+        if tactics is None:
+            return  # 用户取消选择，回到布阵
+        self._apply_tactics(tactics)
         self.phase = "coinflip"
         self.reroll_btn.setEnabled(False)
         self.start_btn.setEnabled(False)
@@ -1274,6 +1416,32 @@ class StarBattleshipDialog(QDialog):
         self._coin_timer = QTimer(self)
         self._coin_timer.timeout.connect(self._coin_tick)
         self._coin_timer.start(70)
+
+    def _ask_tactics(self):
+        """开战前选择战术倾向：游击（+1 扫描）或 攻坚（+1 齐射）。"""
+        box = QMessageBox(self)
+        box.setWindowTitle("⚔️ 战术倾向")
+        box.setText("选择战术倾向：\n\n"
+                    "🛡 游击：初始多获得一发【扫描】\n"
+                    "⚔️ 攻坚：初始多获得一发【齐射】")
+        box.setWindowFlags(box.windowFlags() | Qt.WindowStaysOnTopHint)
+        guerrilla = box.addButton("🛡 游击", QMessageBox.AcceptRole)
+        assault = box.addButton("⚔️ 攻坚", QMessageBox.AcceptRole)
+        box.exec_()
+        clicked = box.clickedButton()
+        if clicked is guerrilla:
+            return "guerrilla"
+        if clicked is assault:
+            return "assault"
+        return None
+
+    def _apply_tactics(self, tactics):
+        if tactics == "guerrilla":
+            self.player_items["scan"] += 1
+            self._log("战术倾向：游击，初始多获得一发【扫描】")
+        else:
+            self.player_items["volley"] += 1
+            self._log("战术倾向：攻坚，初始多获得一发【齐射】")
 
     def _coin_tick(self):
         self._coin_ticks += 1
@@ -1297,6 +1465,8 @@ class StarBattleshipDialog(QDialog):
         self._render_player_board()
         self._render_rosters()
         self._log(f"——— 第 {self.round} 回合 ———")
+        buff = REMY_BUFFS[self._remy_buff_key]
+        self._broadcast(f"蕾咪本局全局被动：【{buff['name']}】{buff['tagline']}")
         if self.current == "player":
             self._start_player_turn()
         else:
@@ -1305,7 +1475,10 @@ class StarBattleshipDialog(QDialog):
     def _reroll_player(self):
         if self.phase != "placement":
             return
-        self._deploy_player()
+        # 保持当前上场舰体（self.player_fleet）不变，仅重新随机其在地图上的排布位置
+        self.player_board, self.player_ships = R.place_fleet("player", self.player_fleet)
+        R.apply_deploy_traits(self.player_ships, "player")
+        self._init_player_items()
         self._render_player_board()
         self._render_rosters()
 
@@ -1338,7 +1511,15 @@ class StarBattleshipDialog(QDialog):
         self._sync_item_buttons()
 
     def _open_codex(self):
-        ShipCodexDialog(self).exec_()
+        # 图鉴以无模态方式打开，开着图鉴也能继续对局；只创建一次、重复打开则置前。
+        if self._codex is None:
+            self._codex = ShipCodexDialog(self)
+            self._codex.setWindowFlags(
+                self._codex.windowFlags() | Qt.WindowStaysOnTopHint
+            )
+        self._codex.show()
+        self._codex.raise_()
+        self._codex.activateWindow()
 
     # ============================================================
     #  播报 / 历史 / 结算
@@ -1389,4 +1570,11 @@ class StarBattleshipDialog(QDialog):
         """被击沉舰体该格的弱点标记：有弱点→实心；无弱点→在原弱点位置标空心。"""
         if ship["weak_cells"]:
             return "solid" if pos in ship["weak_cells"] else None
+        return "hollow" if pos in ship.get("init_weak_cells", set()) else None
+
+    @staticmethod
+    def _alive_weak_marker(ship, pos):
+        """存活舰体该格的弱点标记：有弱点→实心；弱点已消除→在原弱点位置标空心。"""
+        if pos in ship["weak_cells"]:
+            return "solid"
         return "hollow" if pos in ship.get("init_weak_cells", set()) else None

@@ -165,6 +165,7 @@ class RemyDesktopPet(QWidget):
         self.init_ui()
         self.init_tray()
         self.mystery_number = MysteryNumberManager(self)
+        self._dialogs = {}  # 无模态对话框引用：防重复打开 + 防被回收
 
         #音乐监听/播放器抓取
         self.current_music_title = ""
@@ -1533,35 +1534,75 @@ class RemyDesktopPet(QWidget):
         finally:
             self.thinking.set_menu_open(False)
 
+    # ============================================================
+    #  无模态对话框管理
+    # ============================================================
+
+    def _show_dialog(self, key, cls, *args, on_finished=None, **kwargs):
+        """以无模态方式打开对话框：已打开则置前，否则创建并保持引用。
+
+        桌宠主窗口是 always-on-top，对话框也加 WindowStaysOnTopHint 才不会
+        被桌宠盖住；设 WA_DeleteOnClose 让关闭后自动释放，避免累积隐藏窗口。
+        """
+        dialog = self._dialogs.get(key)
+        if dialog is not None and dialog.isVisible():
+            dialog.raise_()
+            dialog.activateWindow()
+            return dialog
+        dialog = cls(*args, parent=self, **kwargs)
+        dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowStaysOnTopHint)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        self._dialogs[key] = dialog
+        dialog.finished.connect(
+            lambda *_args, _k=key, _d=dialog: self._on_dialog_closed(_k, _d)
+        )
+        if on_finished is not None:
+            dialog.finished.connect(on_finished)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        return dialog
+
+    def _on_dialog_closed(self, key, dialog):
+        """对话框关闭后从引用表移除（仅当仍指向同一实例，防止覆盖后误删）。"""
+        if self._dialogs.get(key) is dialog:
+            self._dialogs.pop(key, None)
+
+    def _on_2048_closed(self, _result):
+        dialog = self.sender()
+        if dialog is not None and getattr(dialog, "score", 0) > 0:
+            config.update_stat("last_2048_score", dialog.score)
+
+    def _on_update_dialog_closed(self, _result):
+        dialog = self.sender()
+        if dialog is not None and getattr(dialog, "install_pending", False):
+            self.quit_app()
+            return
+        # 用户可能在对话框里点了「跳过此版本」，配置已改，清掉缓存的结果
+        skipped = config.CONFIG.get("update", {}).get("skip_version", "")
+        if skipped and self._latest_release is not None and skipped == self._latest_release.version:
+            self._latest_release = None
+
     def open_history(self):
-        dialog = HistoryDialog(self)
-        dialog.exec_()
+        self._show_dialog("history", HistoryDialog)
 
     def open_help(self):
-        dialog = HelpDialog(self)
-        dialog.exec_()
+        self._show_dialog("help", HelpDialog)
 
     def open_about(self):
-        dialog = AboutDialog(self)
-        dialog.exec_()
+        self._show_dialog("about", AboutDialog)
 
     def open_settings(self):
-        dialog = SettingsDialog(self)
-        dialog.exec_()
+        self._show_dialog("settings", SettingsDialog)
 
     def open_master_profile(self):
-        dialog = MasterProfileDialog(self)
-        dialog.exec_()
+        self._show_dialog("master_profile", MasterProfileDialog)
 
     def open_note(self):
-        dialog = NoteDialog(self)
-        dialog.exec_()
+        self._show_dialog("note", NoteDialog)
 
     def open_2048(self):
-        dialog = Game2048Dialog(self)
-        dialog.exec_()
-        if getattr(dialog, "score", 0) > 0:
-            config.update_stat("last_2048_score", dialog.score)
+        self._show_dialog("2048", Game2048Dialog, on_finished=self._on_2048_closed)
 
     def _show_api_setup(self):
         """首次启动弹出 API 配置向导"""
@@ -1570,24 +1611,19 @@ class RemyDesktopPet(QWidget):
 
     def open_api_settings(self):
         """右键菜单 → API 设置"""
-        dialog = APISettingsDialog(self)
-        dialog.exec_()
+        self._show_dialog("api_settings", APISettingsDialog)
 
     def open_rps(self):
-        dialog = RPSDialog(self)
-        dialog.exec_()
+        self._show_dialog("rps", RPSDialog)
 
     def open_dice(self):
-        dialog = DiceDialog(self)
-        dialog.exec_()
+        self._show_dialog("dice", DiceDialog)
 
     def open_battleship(self):
-        dialog = BattleshipDialog(self)
-        dialog.exec_()
+        self._show_dialog("battleship", BattleshipDialog)
 
     def open_star_battleship(self):
-        dialog = StarBattleshipDialog(self)
-        dialog.exec_()
+        self._show_dialog("star_battleship", StarBattleshipDialog)
 
     def show_mystery_number(self):
         """右键菜单 → 显示神秘小数字"""
@@ -1610,8 +1646,7 @@ class RemyDesktopPet(QWidget):
 
     def open_wallpaper_picker(self):
         """右键菜单 → 切换壁纸（弹窗预览）"""
-        dialog = WallpaperPickerDialog(self)
-        dialog.exec_()
+        self._show_dialog("wallpaper_picker", WallpaperPickerDialog)
 
     def launch_app(self, name, path):
         try:
@@ -1716,17 +1751,8 @@ class RemyDesktopPet(QWidget):
         if self._latest_release is None:
             self.start_update_check(force=True)
             return
-        dialog = UpdateDialog(self._latest_release, self)
-        dialog.exec_()
-        # 用户点了「立即安装并重启」：.bat 已在后台分离启动并等待旧程序退出，
-        # 这里直接走完整退出流程（保存会话/统计 → 退托盘 → QApplication.quit）
-        if dialog.install_pending:
-            self.quit_app()
-            return
-        # 用户可能在对话框里点了「跳过此版本」，配置已改，清掉缓存的结果
-        skipped = config.CONFIG.get("update", {}).get("skip_version", "")
-        if skipped and skipped == self._latest_release.version:
-            self._latest_release = None
+        self._show_dialog("update", UpdateDialog, self._latest_release,
+                          on_finished=self._on_update_dialog_closed)
 
     def closeEvent(self, event):
         """关闭窗口时隐藏到系统托盘，而不是退出程序"""

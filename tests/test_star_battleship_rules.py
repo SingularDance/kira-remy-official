@@ -51,16 +51,16 @@ class TestAreas(unittest.TestCase):
         self.assertEqual(len(R.column_cells(3)), 10)
         self.assertEqual(len(R.row_cells(3)), 10)
 
-    def test_line_4(self):
-        v = R.line_4_vertical((5, 5))
-        self.assertEqual(v, [(4, 5), (5, 5), (6, 5), (7, 5)])
-        h = R.line_4_horizontal((5, 5))
-        self.assertEqual(h, [(5, 4), (5, 5), (5, 6), (5, 7)])
-        # 越界时夹回，仍为 4 格
-        self.assertEqual(len(R.line_4_vertical((0, 0))), 4)
-        self.assertEqual(len(R.line_4_horizontal((0, 0))), 4)
-        self.assertEqual(len(R.line_4_vertical((9, 9))), 4)
-        self.assertEqual(len(R.line_4_horizontal((9, 9))), 4)
+    def test_line_6(self):
+        v = R.line_6_vertical((5, 5))
+        self.assertEqual(v, [(3, 5), (4, 5), (5, 5), (6, 5), (7, 5), (8, 5)])
+        h = R.line_6_horizontal((5, 5))
+        self.assertEqual(h, [(5, 3), (5, 4), (5, 5), (5, 6), (5, 7), (5, 8)])
+        # 越界时夹回，仍为 6 格
+        self.assertEqual(len(R.line_6_vertical((0, 0))), 6)
+        self.assertEqual(len(R.line_6_horizontal((0, 0))), 6)
+        self.assertEqual(len(R.line_6_vertical((9, 9))), 6)
+        self.assertEqual(len(R.line_6_horizontal((9, 9))), 6)
 
 
 class TestShipShapes(unittest.TestCase):
@@ -73,6 +73,24 @@ class TestShipShapes(unittest.TestCase):
         t = R.SHIP_TYPES["ai"]["flagship"]
         self.assertEqual(t["size"], 11)
         self.assertEqual(t["weak_cell"], (4, 2))  # 士字竖笔底端
+        # 士字：顶短横 3（row0 cols1-3）+ 底长横 5（row3 cols0-4）+ 竖 5（col2）
+        self.assertEqual(set(t["cells"]), {
+            (0, 1), (0, 2), (0, 3), (1, 2), (2, 2),
+            (3, 0), (3, 1), (3, 2), (3, 3), (3, 4), (4, 2),
+        })
+
+    def test_ai_assault_shape(self):
+        self.assertEqual(R.SHIP_TYPES["ai"]["assault"]["size"], 4)
+
+    def test_ai_destroyer_shape(self):
+        self.assertEqual(R.SHIP_TYPES["ai"]["destroyer"]["size"], 5)
+
+    def test_max_counts(self):
+        expected = {"scout": 3, "frigate": 2, "assault": 2,
+                    "destroyer": 1, "command": 1, "flagship": 1}
+        for side in ("ai", "player"):
+            for key, cnt in expected.items():
+                self.assertEqual(R.SHIP_TYPES[side][key]["max_count"], cnt)
 
     def test_player_command_shape(self):
         t = R.SHIP_TYPES["player"]["command"]
@@ -92,8 +110,8 @@ class TestShipShapes(unittest.TestCase):
 
 
 class TestFleetGeneration(unittest.TestCase):
-    def _fleet_stats(self, side, ship_count=None):
-        fleet = R.generate_fleet(side, ship_count=ship_count)
+    def _fleet_stats(self, side):
+        fleet = R.generate_fleet(side)
         total = sum(R.SHIP_TYPES[side][k]["size"] for k in fleet)
         counts = {k: fleet.count(k) for k in set(fleet)}
         return fleet, total, counts
@@ -101,10 +119,12 @@ class TestFleetGeneration(unittest.TestCase):
     def test_ai_fleet(self):
         for _ in range(60):
             fleet, total, counts = self._fleet_stats("ai")
-            self.assertLessEqual(total, 33)  # 总格数只是上限
+            self.assertLessEqual(total, 35)  # 总格数只是上限
             self.assertIn("command", fleet)
             self.assertIn("flagship", fleet)
-            self.assertIn(len(fleet), (3, 4, 5, 6))
+            self.assertGreaterEqual(len(fleet), 3)  # 至少 3 艘
+            # 护卫舰+突击舰 合计 ≤2
+            self.assertLessEqual(fleet.count("frigate") + fleet.count("assault"), 2)
             for k, c in counts.items():
                 self.assertLessEqual(c, R.SHIP_TYPES["ai"][k]["max_count"])
 
@@ -112,24 +132,12 @@ class TestFleetGeneration(unittest.TestCase):
         for _ in range(60):
             fleet, total, counts = self._fleet_stats("player")
             self.assertLessEqual(total, 22)
-            self.assertIn(len(fleet), (6, 7, 8, 9))
-            # 指挥舰与旗舰二选一
-            self.assertEqual(("command" in fleet) ^ ("flagship" in fleet), True)
+            self.assertGreaterEqual(len(fleet), 3)  # 至少 3 艘
+            # 指挥舰与旗舰都必带
+            self.assertIn("command", fleet)
+            self.assertIn("flagship", fleet)
             for k, c in counts.items():
                 self.assertLessEqual(c, R.SHIP_TYPES["player"][k]["max_count"])
-
-    def test_ship_count_correspondence(self):
-        for ai_count in (3, 4, 5, 6):
-            self.assertEqual(R.player_ship_count_for(ai_count), ai_count + 3)
-
-    def test_explicit_ship_count(self):
-        for _ in range(20):
-            for ai_count in (3, 4, 5, 6):
-                fleet = R.generate_fleet("ai", ship_count=ai_count)
-                self.assertEqual(len(fleet), ai_count)
-                player_count = R.player_ship_count_for(ai_count)
-                pfleet = R.generate_fleet("player", ship_count=player_count)
-                self.assertEqual(len(pfleet), player_count)
 
 
 class TestPlacement(unittest.TestCase):
@@ -183,8 +191,9 @@ class TestHitResolution(unittest.TestCase):
     def test_resolve_hits_weak(self):
         ships = [_make_ship([(0, 0), (0, 1)], [(0, 0)], "destroyer")]
         shots = set()
-        events, destroyed = R.resolve_hits(ships, shots, [(0, 0)])
+        events, destroyed, weak_killed = R.resolve_hits(ships, shots, [(0, 0)])
         self.assertEqual(len(destroyed), 1)
+        self.assertEqual(len(weak_killed), 1)  # 通过弱点击毁
         self.assertIn((0, 0), shots)
         self.assertIn((0, 1), shots)  # 整舰格子已炮击
 
@@ -204,29 +213,30 @@ class TestTraits(unittest.TestCase):
         c = _make_ship([(5, 5)], [(5, 5)], "scout")
         self.assertFalse(R.has_adjacent_ship(c, [a, b, c]))
 
-    def test_eliminate_weak_frigate_protected(self):
+    def test_eliminate_weak_frigate(self):
         frigate = _make_ship([(0, 0), (0, 1)], [(0, 0)], "frigate")
-        self.assertFalse(R.eliminate_weak_points(frigate))
-        self.assertTrue(frigate["weak_cells"])  # 护卫舰弱点未被消除
+        self.assertTrue(R.eliminate_weak_points(frigate))
+        self.assertFalse(frigate["weak_cells"])  # 护卫舰弱点现可被消除
 
     def test_add_weak_points(self):
         s = _make_ship([(0, 0), (0, 1), (0, 2), (0, 3)], [(0, 0)], "frigate")
         R.add_weak_points(s, 3)
         self.assertEqual(len(s["weak_cells"]), 4)
 
-    def test_frigate_protect(self):
-        frigate = _make_ship([(0, 0), (0, 1), (1, 0), (1, 1)], [(0, 0)], "frigate")
-        scout = _make_ship([(2, 0)], [(2, 0)], "scout")
-        other = R.frigate_protect(frigate, [frigate, scout], R.DIR_ORDER_AI, 3)
-        self.assertEqual(other, scout)
-        self.assertFalse(scout["weak_cells"])  # 侦察梭弱点被消除
-        self.assertEqual(len(frigate["weak_cells"]), 4)  # 自身弱点 +3
+    def test_frigate_adjacent_clear(self):
+        # 玩家护卫舰【裙摆】：接壤时消除自身及所接壤舰体的弱点
+        frigate = _make_ship([(0, 0), (0, 1)], [(0, 0)], "frigate")
+        scout = _make_ship([(0, 2)], [(0, 2)], "scout")
+        events = R.apply_deploy_traits([frigate, scout], "player")
+        self.assertFalse(frigate["weak_cells"])  # 自身弱点被消除
+        self.assertFalse(scout["weak_cells"])    # 邻舰弱点被消除
+        self.assertTrue(any("裙摆" in e for e in events))
 
     def test_assault_conceal(self):
         assault = _make_ship([(0, 0), (0, 1), (0, 2)], [(0, 0)], "assault")
-        self.assertFalse(R.has_adjacent_ship(assault, [assault]))
-        assault["weak_cells"].clear()  # 模拟藏匿生效
-        self.assertFalse(assault["weak_cells"])
+        events = R.apply_deploy_traits([assault], "ai")
+        self.assertFalse(assault["weak_cells"])  # 孤立 → 匿鹰消除自身弱点
+        self.assertTrue(any("匿鹰" in e for e in events))
 
     def test_special_shot_on_destroy(self):
         self.assertEqual(R.special_shot_on_destroy(_make_ship([(0, 0)], [(0, 0)], "destroyer")),
@@ -236,10 +246,13 @@ class TestTraits(unittest.TestCase):
         self.assertIsNone(R.special_shot_on_destroy(_make_ship([(0, 0)], [(0, 0)], "scout")))
 
     def test_player_trait_texts(self):
-        # 侦察梭【斥候】→ 唯一存活时每回合炮击+1
-        self.assertIn("每回合炮击次数+1", R.SHIP_TYPES["player"]["scout"]["trait"])
-        # 指挥舰【计策】→ 每回合道具次数+1
-        self.assertIn("每回合可使用道具次数+1", R.SHIP_TYPES["player"]["command"]["trait"])
+        # 侦察梭【垂眸】→ 唯一存活时获得相位γ+相位θ
+        self.assertIn("相位炮击γ", R.SHIP_TYPES["player"]["scout"]["trait"])
+        self.assertIn("相位扫描θ", R.SHIP_TYPES["player"]["scout"]["trait"])
+        # 指挥舰【羽翼】→ 初始可使用道具次数+1
+        self.assertIn("初始可使用道具次数+1", R.SHIP_TYPES["player"]["command"]["trait"])
+        # AI 侦察梭【孤雀】→ 唯一存活时炮击变激光α
+        self.assertIn("激光炮击α", R.SHIP_TYPES["ai"]["scout"]["trait"])
         # 所有舰体均有简略特性（悬浮窗用）
         for side in ("ai", "player"):
             for key in R.SHIP_KEYS:
